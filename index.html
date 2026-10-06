@@ -42,7 +42,7 @@ h1{font:600 26px/1.1 ui-serif,"New York",Georgia,serif;margin:0;letter-spacing:-
   grid-template-columns:1fr 1fr;grid-template-rows:repeat(4,minmax(0,1fr));gap:14px}
 .tuile{all:unset;box-sizing:border-box;position:relative;display:flex;flex-direction:column;
   justify-content:space-between;align-items:flex-start;gap:8px;min-height:0;padding:16px;
-  border-radius:24px;overflow:hidden;cursor:pointer;background:var(--papier);
+  border-radius:24px;overflow:hidden;cursor:pointer;background:var(--papier);color:var(--encre);
   border:1px solid var(--trait);-webkit-tap-highlight-color:transparent;
   transition:transform .12s ease}
 .tuile:active{transform:scale(.97)}
@@ -89,11 +89,12 @@ details.guide a{color:var(--laiton)}
 
 .compte{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:6px}
 .compte .nom-login{color:var(--sec);font-size:15px}
-.actions{display:flex;gap:16px;margin-bottom:12px}
+.actions{display:flex;flex-wrap:wrap;gap:4px 18px;margin-bottom:12px}
 
-#liste-apps{list-style:none;margin:0;padding:0;border:1px solid var(--trait);border-radius:14px;
+#liste-apps,.liste-perso{list-style:none;margin:0;padding:0;border:1px solid var(--trait);border-radius:14px;
   background:var(--papier);overflow:hidden}
-#liste-apps li+li{border-top:1px solid var(--trait)}
+.liste-perso{margin-bottom:12px}
+#liste-apps li+li,.liste-perso li+li{border-top:1px solid var(--trait)}
 .ligne-app{all:unset;box-sizing:border-box;display:flex;align-items:center;gap:14px;width:100%;
   padding:14px 16px;cursor:pointer;-webkit-tap-highlight-color:transparent}
 .ligne-app:active{background:var(--laiton-fond)}
@@ -104,6 +105,8 @@ details.guide a{color:var(--laiton)}
 .txt small{color:var(--sec);font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chev{color:var(--sec);font-size:24px;flex:none}
 .vide{border:1px dashed var(--trait);border-radius:14px;padding:22px 18px;text-align:center;color:var(--sec)}
+.pastille{width:30px;height:30px;border-radius:50%;flex:none;border:2px solid var(--trait);background:var(--papier)}
+.pastille.defaut{border-style:dashed}
 
 #vue-app{position:fixed;inset:0;display:flex;flex-direction:column;background:var(--papier);z-index:5;
   padding-bottom:env(safe-area-inset-bottom,0px)}
@@ -120,7 +123,7 @@ details.guide a{color:var(--laiton)}
   flex-direction:column;border-radius:18px 18px 0 0}
 .fenetre h3{margin:0;padding:18px 18px 10px;font:600 20px/1.2 ui-serif,"New York",Georgia,serif}
 #m-corps{overflow:auto;padding:0 18px 12px;-webkit-overflow-scrolling:touch}
-#m-pied{display:flex;gap:10px;justify-content:flex-end;border-top:1px solid var(--trait);
+#m-pied{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;border-top:1px solid var(--trait);
   padding:12px 18px calc(env(safe-area-inset-bottom,0px) + 14px)}
 
 .vers{padding:10px 0;border-top:1px solid var(--trait)}
@@ -141,6 +144,21 @@ details.guide a{color:var(--laiton)}
 .res .depot{font-weight:600;padding-top:10px;word-break:break-all}
 .res .fic{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 0 6px 12px;
   color:var(--sec);font-size:15px;word-break:break-all}
+
+/* ----- Éditeur de tuile ----- */
+.apercu{width:62%;min-width:170px;height:118px;margin:2px 0 6px;display:flex}
+.apercu .tuile{width:100%;cursor:default}
+.apercu .tuile:active{transform:none}
+.etiq{display:block;font-weight:600;margin:16px 0 8px}
+.palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:12px 10px;margin-bottom:6px}
+.coul{position:relative;width:46px;height:46px;border-radius:50%;border:0;padding:0;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:700;color:#fff;
+  -webkit-tap-highlight-color:transparent}
+.coul .mk{position:relative;pointer-events:none}
+.coul.sel{box-shadow:0 0 0 3px var(--papier),0 0 0 5px var(--laiton)}
+.coul.defaut{background:transparent;border:2px dashed var(--trait);color:var(--sec)}
+.coul.autre{background:conic-gradient(#C0392B,#D35400,#B7791F,#6B8E23,#2E8B57,#00897B,#2F6FB5,#3949AB,#7B4FA3,#B03A7A,#C0392B);overflow:hidden}
+.coul.autre input{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer;border:0;padding:0}
 </style>
 </head>
 <body>
@@ -171,7 +189,7 @@ details.guide a{color:var(--laiton)}
       <summary>Créer une clé en lecture seule</summary>
       <ol>
         <li>Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">la page de création d'une clé</a> sur GitHub.</li>
-        <li>« Repository access » : choisis « Only select repositories » et coche les dépôts privés voulus.</li>
+        <li>« Repository access » : choisis « Only select repositories » et coche les dépôts privés voulus (ajoute aussi passerelle-privatedata pour lire tes réglages de tuiles).</li>
         <li>« Permissions » → « Repository permissions » → « Contents » : Read-only.</li>
         <li>Choisis une date d'expiration, génère la clé et copie-la ici.</li>
       </ol>
@@ -187,6 +205,7 @@ details.guide a{color:var(--laiton)}
     <div class="actions">
       <button class="lien" id="b-decouvrir" type="button">Découvrir</button>
       <button class="lien" id="b-gerer" type="button">Gérer</button>
+      <button class="lien" id="b-perso" type="button">Personnaliser</button>
       <button class="lien" id="b-cle" type="button">Changer de clé</button>
     </div>
     <ul id="liste-apps"></ul>
@@ -230,8 +249,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.1.0';
+var VERSION = '1.2.0';
 var HISTORIQUE = [
+  { v:'1.2.0', date:'6 oct. 2026', notes:[
+    'Tuiles de l\'accueil personnalisables : nom et couleur par app (lien « Personnaliser »), avec palette, couleur libre et aperçu en direct.',
+    'Réglages stockés dans apps.json du dépôt privé passerelle-privatedata (clé d\'écriture dédiée), avec copie locale sur l\'appareil.'
+  ]},
   { v:'1.1.0', date:'6 oct. 2026', notes:[
     'Nouvel écran d\'accueil à 8 grandes tuiles : Passerelle (liste des apps), Déployeur, et les 6 dernières apps ouvertes.',
     'Le Déployeur se désigne dans Gérer (bouton 🚀) ; détecté automatiquement s\'il s\'appelle deployeur.',
@@ -244,13 +267,23 @@ var HISTORIQUE = [
 ];
 
 /* ---------- Constantes et état ---------- */
-var KEY_TOKEN = 'passerelle_token';
-var KEY_APPS  = 'passerelle_apps';
-var KEY_DEP   = 'passerelle_deployeur';
-var KEY_REC   = 'passerelle_recents';
+var KEY_TOKEN   = 'passerelle_token';
+var KEY_TOKEN_W = 'passerelle_token_ecriture';
+var KEY_APPS    = 'passerelle_apps';
+var KEY_DEP     = 'passerelle_deployeur';
+var KEY_REC     = 'passerelle_recents';
+var KEY_PERSO   = 'passerelle_perso';
 var API = 'https://api.github.com';
+var DATA_REPO = 'passerelle-privatedata';
+var DATA_FILE = 'apps.json';
 var NB_RECENTS = 6;
+var PALETTE = [
+  ['Brique','#C0392B'], ['Potiron','#D35400'], ['Miel','#B7791F'], ['Olive','#6B8E23'],
+  ['Sapin','#2E8B57'], ['Lagon','#00897B'], ['Bleu','#2F6FB5'], ['Indigo','#3949AB'],
+  ['Prune','#7B4FA3'], ['Framboise','#B03A7A'], ['Noyer','#6D4C41'], ['Ardoise','#455A64']
+];
 var etat = { token:null, login:null, apps:[], deployeur:null, recents:[],
+             perso:{}, attente:[], sync:{ ok:null, msg:'' }, cleRefusee:false,
              appCourante:null, chargement:0, arret:false, retour:'accueil' };
 
 /* ---------- Utilitaires ---------- */
@@ -270,14 +303,25 @@ function messageErreur(e){
   if(e instanceof TypeError) return 'Connexion à GitHub impossible. Vérifie ton réseau.';
   return (e && e.message) || 'Erreur inconnue.';
 }
+function b64enc(s){ return btoa(unescape(encodeURIComponent(s))); }
+function b64dec(b){ return decodeURIComponent(escape(atob(b.replace(/\s/g, '')))); }
+function texteSur(hex){
+  var n = parseInt(hex.slice(1), 16), r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255;
+  function f(c){ c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+  var L = 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  return L > 0.18 ? '#18212B' : '#FFFFFF';
+}
 
-/* ---------- Clé, liste d'apps, Déployeur, récents ---------- */
+/* ---------- Clés, liste d'apps, Déployeur, récents ---------- */
 function chargerToken(){ return lsGet(KEY_TOKEN) || ssGet(KEY_TOKEN) || null; }
 function sauverToken(t, garder){
   lsDel(KEY_TOKEN); ssDel(KEY_TOKEN);
   if(garder) lsSet(KEY_TOKEN, t); else ssSet(KEY_TOKEN, t);
 }
 function effacerToken(){ lsDel(KEY_TOKEN); ssDel(KEY_TOKEN); }
+function chargerTokenEcriture(){ return lsGet(KEY_TOKEN_W); }
+function sauverTokenEcriture(t){ lsSet(KEY_TOKEN_W, t); }
+function retirerCleEcriture(){ lsDel(KEY_TOKEN_W); }
 
 function appValide(a){
   return a && typeof a.repo === 'string' && /^[\w.-]+\/[\w.-]+$/.test(a.repo) &&
@@ -337,10 +381,164 @@ function recentsValides(){
   return out;
 }
 
+/* ---------- Nom et couleur des tuiles ---------- */
+function nettoyerPerso(obj){
+  var out = {};
+  if(!obj || typeof obj !== 'object') return out;
+  Object.keys(obj).forEach(function(id){
+    var p = obj[id];
+    if(!p || typeof p !== 'object') return;
+    var nom = typeof p.nom === 'string' ? p.nom.trim().slice(0, 24) : '';
+    var couleur = (typeof p.couleur === 'string' && /^#[0-9a-f]{6}$/i.test(p.couleur)) ? p.couleur.toUpperCase() : '';
+    if(nom || couleur) out[id] = { nom: nom, couleur: couleur };
+  });
+  return out;
+}
+function chargerPersoLocal(){
+  try{
+    var j = JSON.parse(lsGet(KEY_PERSO) || '{}');
+    etat.perso = nettoyerPerso(j.apps);
+    etat.attente = Array.isArray(j.attente) ? j.attente.filter(function(x){ return typeof x === 'string'; }) : [];
+  }catch(e){ etat.perso = {}; etat.attente = []; }
+}
+function sauverPersoLocal(){
+  lsSet(KEY_PERSO, JSON.stringify({ apps: etat.perso, attente: etat.attente }));
+}
+function nomTuile(app){
+  var p = etat.perso[idApp(app)];
+  return (p && p.nom) || (idApp(app) === etat.deployeur ? 'Déployeur' : app.label);
+}
+function couleurTuile(app){
+  var p = etat.perso[idApp(app)];
+  return (p && p.couleur) || '';
+}
+function iconeTuile(app){
+  if(idApp(app) === etat.deployeur) return (app.icone && app.icone !== '📄') ? app.icone : '🚀';
+  return app.icone || '📄';
+}
+function enregistrerPerso(app, nom, couleur){
+  var id = idApp(app);
+  nom = (nom || '').trim().slice(0, 24);
+  if(!nom && !couleur) delete etat.perso[id];
+  else etat.perso[id] = { nom: nom, couleur: couleur || '' };
+  if(etat.attente.indexOf(id) < 0) etat.attente.push(id);
+  sauverPersoLocal();
+  rendreAccueil();
+}
+function appliquerAttente(apps){
+  etat.attente.forEach(function(id){
+    if(etat.perso[id]) apps[id] = etat.perso[id]; else delete apps[id];
+  });
+  return apps;
+}
+
+/* ---------- Synchronisation avec passerelle-privatedata ---------- */
+function depotData(){ return etat.login + '/' + DATA_REPO; }
+function enteteJson(tok){
+  var h = entetes(null, tok);
+  h['Content-Type'] = 'application/json';
+  return h;
+}
+async function lireDistant(tok){
+  var res = await fetch(API + '/repos/' + depotData() + '/contents/' + DATA_FILE,
+                        { headers: entetes(null, tok), cache: 'no-store' });
+  if(res.status === 404){
+    var rr = await fetch(API + '/repos/' + depotData(), { headers: entetes(null, tok), cache: 'no-store' });
+    if(!rr.ok){
+      var e = new Error('Dépôt ' + DATA_REPO + ' introuvable ou non autorisé pour cette clé.');
+      e.status = rr.status; throw e;
+    }
+    return { data: null, sha: null };
+  }
+  if(!res.ok) throw await erreurApi(res);
+  var j = await res.json();
+  var data;
+  try{ data = JSON.parse(b64dec(j.content)); }
+  catch(err){ throw new Error(DATA_FILE + ' est illisible (JSON invalide).'); }
+  return { data: data, sha: j.sha };
+}
+async function ecrireDistant(tok, data, sha){
+  var corps = { message: 'Passerelle : réglages des tuiles', content: b64enc(JSON.stringify(data, null, 1)) };
+  if(sha) corps.sha = sha;
+  var res = await fetch(API + '/repos/' + depotData() + '/contents/' + DATA_FILE,
+                        { method: 'PUT', headers: enteteJson(tok), body: JSON.stringify(corps) });
+  if(!res.ok){
+    var e;
+    if(res.status === 401) e = new Error('Clé d\'écriture invalide ou expirée.');
+    else if(res.status === 403 || res.status === 404)
+      e = new Error('Clé d\'écriture refusée : elle doit avoir « Contents : Read and write » sur ' + DATA_REPO + '.');
+    else e = await erreurApi(res);
+    e.status = res.status; throw e;
+  }
+}
+function majStatutPerso(){
+  var p = document.getElementById('p-statut');
+  if(!p) return;
+  p.className = 'etat' + (etat.sync.ok === true ? ' ok' : etat.sync.ok === false ? ' erreur' : '');
+  p.textContent = etat.sync.msg || 'Réglages enregistrés sur cet appareil.';
+}
+function rafraichirPerso(){
+  if(document.getElementById('p-liste') && !$('overlay').hidden) ouvrirPerso();
+}
+async function synchroniserPerso(){
+  if(!etat.token || !etat.login) return;
+  etat.sync = { ok: null, msg: 'Synchronisation avec ' + DATA_REPO + '…' };
+  majStatutPerso();
+  var toks = [etat.token], w = chargerTokenEcriture();
+  if(w) toks.push(w);
+  var derniere = null;
+  for(var i = 0; i < toks.length; i++){
+    try{
+      var r = await lireDistant(toks[i]);
+      if(r.data){
+        etat.perso = appliquerAttente(nettoyerPerso(r.data.apps));
+        sauverPersoLocal();
+      }
+      etat.sync = { ok: true, msg: r.data ? 'Synchronisé avec ' + DATA_REPO + '.'
+                                          : DATA_FILE + ' sera créé au premier enregistrement.' };
+      majStatutPerso(); rendreAccueil(); rafraichirPerso();
+      if(etat.attente.length && w) await pousser();
+      return;
+    }catch(e){ derniere = e; }
+  }
+  etat.sync = { ok: false, msg: messageErreur(derniere) + ' Les réglages restent sur cet appareil.' };
+  majStatutPerso();
+}
+async function pousser(){
+  if(!etat.attente.length) return 'ok';
+  var tok = chargerTokenEcriture();
+  if(!tok || !etat.login){
+    etat.sync = { ok: false, msg: 'Réglages enregistrés sur cet appareil. Ajoute une clé d\'écriture pour les partager via GitHub.' };
+    majStatutPerso();
+    return 'cle';
+  }
+  etat.sync = { ok: null, msg: 'Envoi vers ' + DATA_REPO + '…' };
+  majStatutPerso();
+  var derniere = null;
+  for(var essai = 0; essai < 2; essai++){
+    try{
+      var r = await lireDistant(tok);
+      var apps = appliquerAttente(r.data ? nettoyerPerso(r.data.apps) : {});
+      await ecrireDistant(tok, { version: 1, maj: new Date().toISOString(), apps: apps }, r.sha);
+      etat.perso = apps; etat.attente = []; sauverPersoLocal();
+      etat.sync = { ok: true, msg: 'Réglages enregistrés dans ' + DATA_REPO + '.' };
+      majStatutPerso(); rendreAccueil(); rafraichirPerso();
+      return 'ok';
+    }catch(e){
+      derniere = e;
+      if(e.status !== 409 && e.status !== 422) break;
+    }
+  }
+  if(derniere && derniere.status === 401) retirerCleEcriture();
+  etat.sync = { ok: false, msg: messageErreur(derniere) + ' Réglages gardés sur cet appareil.' };
+  majStatutPerso();
+  return 'erreur';
+}
+
 /* ---------- Appels GitHub ---------- */
-function entetes(accept){
+function entetes(accept, tok){
   return {
-    'Authorization': 'Bearer ' + etat.token,
+    'Authorization': 'Bearer ' + (tok || etat.token),
     'Accept': accept || 'application/vnd.github+json',
     'X-GitHub-Api-Version': '2022-11-28'
   };
@@ -401,7 +599,7 @@ var SVG_CLE = '<svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="20" cy="32" r="12"/>' +
   '<circle cx="20" cy="32" r="3" fill="currentColor"/><path d="M32 32h28M50 32v10M58 32v7"/></svg>';
 
-function tuile(classe, iconeHtml, titre, sous, action, etiquette){
+function tuile(classe, iconeHtml, titre, sous, action, etiquette, couleur){
   var b = document.createElement('button');
   b.type = 'button';
   b.className = 'tuile ' + classe;
@@ -409,6 +607,11 @@ function tuile(classe, iconeHtml, titre, sous, action, etiquette){
   b.innerHTML = '<span class="t-ico" aria-hidden="true">' + iconeHtml + '</span>' +
     '<span class="t-txt"><span class="t-titre">' + esc(titre) + '</span>' +
     (sous ? '<span class="t-sous">' + esc(sous) + '</span>' : '') + '</span>';
+  if(couleur){
+    b.style.background = couleur;
+    b.style.borderColor = couleur;
+    b.style.color = texteSur(couleur);
+  }
   b.onclick = action;
   return b;
 }
@@ -424,8 +627,8 @@ function rendreAccueil(){
 
   var dep = trouverApp(etat.deployeur || '');
   if(dep){
-    g.appendChild(tuile('deploy', esc(dep.icone && dep.icone !== '📄' ? dep.icone : '🚀'),
-      'Déployeur', dep.repo, function(){ ouvrirApp(dep, 'accueil'); }));
+    g.appendChild(tuile('deploy', esc(iconeTuile(dep)), nomTuile(dep), dep.repo,
+      function(){ ouvrirApp(dep, 'accueil'); }, null, couleurTuile(dep)));
   }else{
     g.appendChild(tuile('deploy', '🚀', 'Déployeur', 'À choisir dans Gérer', function(){
       versListe(); ouvrirGerer();
@@ -436,8 +639,8 @@ function rendreAccueil(){
   for(var i = 0; i < NB_RECENTS; i++){
     (function(app){
       if(app){
-        g.appendChild(tuile('', esc(app.icone || '📄'), app.label, app.repo,
-          function(){ ouvrirApp(app, 'accueil'); }));
+        g.appendChild(tuile('', esc(iconeTuile(app)), nomTuile(app), app.repo,
+          function(){ ouvrirApp(app, 'accueil'); }, null, couleurTuile(app)));
       }else{
         g.appendChild(tuile('libre', '+', 'Emplacement libre', 'Ouvre une app pour l\'ajouter', versListe));
       }
@@ -471,6 +674,7 @@ async function connecter(token, garder){
     rendreListe();
     etat.retour = 'accueil';
     afficher('accueil');
+    synchroniserPerso();
   }catch(e){
     etat.token = null; etat.login = null;
     if(e.status === 401) effacerToken();
@@ -489,6 +693,7 @@ async function demarrerAvecToken(token){
     var login = await verifier(token);
     etat.login = login;
     $('login').textContent = 'Connecté : ' + login;
+    synchroniserPerso();
   }catch(e){
     if(e.status === 401){
       effacerToken();
@@ -630,6 +835,161 @@ function ouvrirHistorique(){
       v.notes.map(function(n){ return '<li>' + esc(n) + '</li>'; }).join('') + '</ul></div>';
   }).join('');
   modal('Historique des versions', h, [{ texte:'Fermer' }]);
+}
+
+/* ---------- Personnaliser les tuiles ---------- */
+function ouvrirPerso(){
+  var c = document.createElement('div');
+  var intro = document.createElement('p');
+  intro.className = 'aide';
+  intro.textContent = etat.apps.length
+    ? 'Choisis une app pour régler le nom et la couleur de sa tuile sur l\'accueil.'
+    : 'Ajoute d\'abord des apps (Découvrir ou Gérer).';
+  c.appendChild(intro);
+
+  var ul = document.createElement('ul');
+  ul.id = 'p-liste';
+  ul.className = 'liste-perso';
+  ul.hidden = etat.apps.length === 0;
+  etat.apps.forEach(function(app){
+    var li = document.createElement('li');
+    var b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'ligne-app';
+    var coul = couleurTuile(app);
+    b.innerHTML = '<span class="pastille' + (coul ? '' : ' defaut') + '"' +
+      (coul ? ' style="background:' + coul + ';border-color:' + coul + '"' : '') + '></span>' +
+      '<span class="txt"><strong>' + esc(nomTuile(app)) + '</strong><small>' + esc(app.repo) + '</small></span>' +
+      '<span class="chev" aria-hidden="true">›</span>';
+    b.onclick = function(){ ouvrirEditeur(app); };
+    li.appendChild(b);
+    ul.appendChild(li);
+  });
+  c.appendChild(ul);
+
+  var st = document.createElement('p');
+  st.id = 'p-statut';
+  st.setAttribute('role', 'status');
+  c.appendChild(st);
+
+  modal('Personnaliser l\'accueil', c, [
+    { texte:'Synchroniser', action:function(){ ouvrirPerso(); synchroniserPerso(); } },
+    { texte:'Clé d\'écriture', action:function(){ demanderCleEcriture(); } },
+    { texte:'Fermer', classe:'primaire' }
+  ]);
+  majStatutPerso();
+}
+
+function ouvrirEditeur(app){
+  var id = idApp(app), p = etat.perso[id] || {};
+  var nom = p.nom || '', couleur = p.couleur || '';
+  var estDep = (id === etat.deployeur);
+  var defaut = estDep ? 'Déployeur' : app.label;
+
+  var c = document.createElement('div');
+  c.innerHTML = '<div class="apercu" id="e-apercu"></div>' +
+    '<label class="etiq" for="e-nom">Nom sur la tuile</label>' +
+    '<input type="text" id="e-nom" maxlength="24" autocomplete="off" placeholder="' + esc(defaut) + '">' +
+    '<span class="etiq">Couleur</span><div class="palette" id="e-pal"></div>';
+  modal('Personnaliser la tuile', c, [
+    { texte:'Annuler', action:ouvrirPerso },
+    { texte:'Enregistrer', classe:'primaire', action:function(){ apresEnregistrement(app, nom, couleur); } }
+  ]);
+
+  var champ = c.querySelector('#e-nom');
+  champ.value = nom;
+  function apercu(){
+    var z = c.querySelector('#e-apercu');
+    z.innerHTML = '';
+    z.appendChild(tuile(estDep && !couleur ? 'deploy' : '', esc(iconeTuile(app)),
+      nom.trim() || defaut, app.repo, function(){}, null, couleur));
+  }
+  champ.addEventListener('input', function(){ nom = champ.value; apercu(); });
+
+  var pal = c.querySelector('#e-pal'), cells = [];
+  function majSel(){
+    cells.forEach(function(x){
+      var on;
+      if(x.hex === '') on = !couleur;
+      else if(x.hex === '*') on = !!couleur && !PALETTE.some(function(q){ return q[1] === couleur; });
+      else on = (couleur === x.hex);
+      x.el.classList.toggle('sel', on);
+      var mk = x.el.querySelector('.mk');
+      mk.textContent = on ? '✓' : '';
+      if(x.hex === '*'){
+        x.el.style.background = on ? couleur : '';
+        mk.style.color = on ? texteSur(couleur) : '#fff';
+      }
+    });
+  }
+  function choisir(hex){ couleur = hex; majSel(); apercu(); }
+
+  var d = document.createElement('button');
+  d.type = 'button'; d.className = 'coul defaut'; d.title = 'Couleur par défaut';
+  d.setAttribute('aria-label', 'Couleur par défaut');
+  d.innerHTML = '<span class="mk"></span>';
+  d.onclick = function(){ choisir(''); };
+  pal.appendChild(d); cells.push({ el:d, hex:'' });
+
+  PALETTE.forEach(function(q){
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'coul'; b.title = q[0];
+    b.setAttribute('aria-label', q[0]);
+    b.style.background = q[1]; b.style.color = texteSur(q[1]);
+    b.innerHTML = '<span class="mk"></span>';
+    b.onclick = function(){ choisir(q[1]); };
+    pal.appendChild(b); cells.push({ el:b, hex:q[1] });
+  });
+
+  var a = document.createElement('label');
+  a.className = 'coul autre'; a.title = 'Autre couleur';
+  a.innerHTML = '<input type="color" aria-label="Choisir une autre couleur"><span class="mk"></span>';
+  var inp = a.querySelector('input');
+  inp.value = couleur ? couleur.toLowerCase() : '#2f6fb5';
+  inp.addEventListener('input', function(){ choisir(inp.value.toUpperCase()); });
+  pal.appendChild(a); cells.push({ el:a, hex:'*' });
+
+  majSel();
+  apercu();
+}
+
+async function apresEnregistrement(app, nom, couleur){
+  enregistrerPerso(app, nom, couleur);
+  if(!chargerTokenEcriture() && !etat.cleRefusee){
+    demanderCleEcriture(true);
+    return;
+  }
+  ouvrirPerso();
+  await pousser();
+}
+
+function demanderCleEcriture(auto){
+  var existe = !!chargerTokenEcriture();
+  var c = document.createElement('div');
+  c.innerHTML = '<p class="aide">Cette clé sert uniquement à écrire <strong>' + esc(DATA_FILE) + '</strong> dans le dépôt privé <strong>' +
+    esc(DATA_REPO) + '</strong>, pour retrouver tes noms et couleurs sur tous tes appareils.</p>' +
+    '<ol class="aide" style="padding-left:20px">' +
+    '<li>Ouvre <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener" style="color:var(--laiton)">la création d\'une clé</a>.</li>' +
+    '<li>« Only select repositories » : coche uniquement ' + esc(DATA_REPO) + '.</li>' +
+    '<li>« Contents » : Read and write. Choisis une expiration, génère et copie la clé.</li></ol>' +
+    '<input type="password" id="w-cle" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" ' +
+    'autocorrect="off" spellcheck="false" aria-label="Clé d\'écriture"><p class="etat">' +
+    (existe ? 'Une clé d\'écriture est déjà enregistrée sur cet appareil.' : '') + '</p>';
+  var boutons = [{ texte: auto ? 'Plus tard' : 'Annuler', action:function(){
+    if(auto) etat.cleRefusee = true;
+    ouvrirPerso();
+    pousser();
+  } }];
+  if(existe) boutons.push({ texte:'Retirer la clé', action:function(){ retirerCleEcriture(); ouvrirPerso(); } });
+  boutons.push({ texte:'Enregistrer la clé', classe:'primaire', action:function(){
+    var v = ($('w-cle') ? $('w-cle').value : '').trim();
+    if(!v){ ouvrirPerso(); return; }
+    sauverTokenEcriture(v);
+    etat.cleRefusee = false;
+    ouvrirPerso();
+    if(etat.attente.length) pousser(); else synchroniserPerso();
+  } });
+  modal('Clé d\'écriture', c, boutons);
 }
 
 /* ---------- Gérer la liste ---------- */
@@ -848,6 +1208,7 @@ function init(){
   $('champ-cle').addEventListener('keydown', function(e){ if(e.key === 'Enter') $('b-ouvrir').click(); });
   $('b-cle').onclick = deconnecter;
   $('b-gerer').onclick = ouvrirGerer;
+  $('b-perso').onclick = ouvrirPerso;
   $('b-decouvrir').onclick = ouvrirDecouvrir;
   $('b-accueil').onclick = function(){ etat.retour = 'accueil'; afficher('accueil'); };
   $('b-retour').onclick = fermerApp;
@@ -858,6 +1219,7 @@ function init(){
   etat.apps = chargerApps();
   etat.deployeur = lsGet(KEY_DEP);
   etat.recents = chargerRecents();
+  chargerPersoLocal();
   var t = chargerToken();
   if(t) demarrerAvecToken(t); else afficher('cle');
 }
