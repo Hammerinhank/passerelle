@@ -267,8 +267,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.4.0';
+var VERSION = '1.4.1';
 var HISTORIQUE = [
+  { v:'1.4.1', date:'7 oct. 2026', notes:[
+    'Export/import enrichi : en plus de la liste, il transporte le choix du Déployeur, les apps récentes et les noms/couleurs des tuiles ; l\'accueil est actualisé à l\'import.',
+    'Le Déployeur est reconnu aussi quand le dépôt ou le fichier s\'appelle « deployer » ; le message d\'import détaille ce qui a été ajouté ou était déjà présent.'
+  ]},
   { v:'1.4.0', date:'7 oct. 2026', notes:[
     'Accueil en plusieurs pages : bouton « + » en bas à droite pour passer à la page suivante de 8 tuiles, « ‹ Retour » en bas à gauche pour revenir.',
     'Les pages 2 et suivantes présentent toutes les apps de la liste (hors Déployeur), 8 par page, dans l\'ordre de « Gérer » ; le nombre de pages s\'ajuste tout seul.'
@@ -375,7 +379,7 @@ function nomLisible(repo, file){
   return base.charAt(0).toUpperCase() + base.slice(1);
 }
 function ressembleDeployeur(app){
-  return /deployeur/i.test(app.file) || /\/deployeur$/i.test(app.repo);
+  return /deploy(eu)?r/i.test(app.file) || /\/deploy(eu)?r$/i.test(app.repo);
 }
 function definirDeployeur(app){
   etat.deployeur = app ? idApp(app) : null;
@@ -1199,33 +1203,69 @@ function ouvrirGerer(){
     var j = document.createElement('div');
     j.className = 'form';
     j.innerHTML = '<h4>Copier la liste vers un autre appareil</h4>' +
-      '<p class="aide">La liste est propre à chaque navigateur. Exporte-la ici, puis colle-la sur l\'autre appareil et importe-la.</p>' +
+      '<p class="aide">La liste, le Déployeur, les apps récentes et les tuiles personnalisées sont propres à chaque navigateur. Exporte-les ici, colle le texte sur l\'autre appareil et importe-le.</p>' +
       '<textarea id="g-json" rows="4" spellcheck="false" aria-label="Liste au format JSON"></textarea>' +
       '<div class="rang"><button type="button" class="btn" id="g-exp">Exporter</button>' +
       '<button type="button" class="btn" id="g-imp">Importer (fusion)</button></div>' +
       '<p class="etat" id="g-jmsg" role="status"></p>';
     c.appendChild(j);
     $('g-exp').onclick = function(){
-      var t = JSON.stringify(etat.apps, null, 1);
-      var z = $('g-json'); z.value = t; z.focus(); z.select();
+      var valides = etat.recents.filter(function(id){ return !!trouverApp(id); });
+      var donnees = { version: 2, apps: etat.apps, deployeur: etat.deployeur || '',
+                      recents: valides, perso: etat.perso };
+      var z = $('g-json'); z.value = JSON.stringify(donnees, null, 1); z.focus(); z.select();
       $('g-jmsg').className = 'etat ok';
-      $('g-jmsg').textContent = etat.apps.length + ' app(s) exportée(s). Copie le texte ci-dessus.';
+      $('g-jmsg').textContent = etat.apps.length + ' app(s) exportée(s), avec ' +
+        (etat.deployeur ? 'le Déployeur, ' : '') + valides.length + ' récente(s) et ' +
+        Object.keys(etat.perso).length + ' tuile(s) personnalisée(s). Copie le texte ci-dessus.';
     };
     $('g-imp').onclick = function(){
       var m = $('g-jmsg');
+      var saisie = $('g-json').value;
       try{
-        var a = JSON.parse($('g-json').value);
-        if(!Array.isArray(a)) throw new Error('La liste doit être un tableau JSON.');
-        var ajoutes = 0, ignores = 0;
-        a.forEach(function(x){
+        var brut = JSON.parse(saisie);
+        var liste = Array.isArray(brut) ? brut : (brut && brut.apps);
+        if(!Array.isArray(liste)) throw new Error('format non reconnu : la liste des apps est introuvable.');
+        var ajoutes = 0, presentes = 0, ignores = 0, infos = [];
+        liste.forEach(function(x){
           if(!appValide(x)){ ignores++; return; }
-          if(dejaPresent(x.repo, x.file)) return;
+          if(dejaPresent(x.repo, x.file)){ presentes++; return; }
           ajouterApp({ label: x.label || nomLisible(x.repo, x.file), repo: x.repo, file: x.file, icone: x.icone || '📄' });
           ajoutes++;
         });
+        if(!Array.isArray(brut)){
+          var dep = (typeof brut.deployeur === 'string') ? trouverApp(brut.deployeur) : null;
+          if(dep){ definirDeployeur(dep); infos.push('Déployeur : ' + dep.label); }
+          if(Array.isArray(brut.recents)){
+            var imp = brut.recents.filter(function(id){ return typeof id === 'string' && !!trouverApp(id); });
+            if(imp.length){
+              etat.recents = imp.concat(etat.recents.filter(function(x){ return imp.indexOf(x) < 0; })).slice(0, 12);
+              lsSet(KEY_REC, JSON.stringify(etat.recents));
+              infos.push(imp.length + ' récente(s)');
+            }
+          }
+          if(brut.perso && typeof brut.perso === 'object'){
+            var pp = nettoyerPerso(brut.perso);
+            var ids = Object.keys(pp).filter(function(id){ return !!trouverApp(id); });
+            ids.forEach(function(id){
+              etat.perso[id] = pp[id];
+              if(etat.attente.indexOf(id) < 0) etat.attente.push(id);
+            });
+            if(ids.length){ sauverPersoLocal(); infos.push(ids.length + ' tuile(s) personnalisée(s)'); }
+          }
+        }
+        if(!trouverApp(etat.deployeur || '')){
+          var d = etat.apps.filter(ressembleDeployeur)[0];
+          if(d){ definirDeployeur(d); infos.push('Déployeur reconnu : ' + d.label); }
+        }
+        sauverApps(); rendreListe(); rendreAccueil();
         rendre();
+        $('g-json').value = saisie;
         $('g-jmsg').className = 'etat ok';
-        $('g-jmsg').textContent = ajoutes + ' app(s) ajoutée(s)' + (ignores ? ', ' + ignores + ' entrée(s) invalide(s) ignorée(s).' : '.');
+        $('g-jmsg').textContent = ajoutes + ' app(s) ajoutée(s)' +
+          (presentes ? ', ' + presentes + ' déjà présente(s)' : '') +
+          (ignores ? ', ' + ignores + ' entrée(s) invalide(s) ignorée(s)' : '') +
+          (infos.length ? '. Accueil mis à jour : ' + infos.join(', ') : '') + '.';
       }catch(e){
         m.className = 'etat erreur';
         m.textContent = 'Import impossible : ' + e.message;
