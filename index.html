@@ -159,8 +159,16 @@ details.guide a{color:var(--laiton)}
   color:var(--sec);font-size:15px;word-break:break-all}
 
 /* ----- Éditeur de tuile ----- */
-.apercu{width:62%;min-width:170px;height:118px;margin:2px 0 6px;display:flex}
-.apercu .tuile{width:100%;cursor:default}
+.apercu{position:sticky;top:0;z-index:2;background:var(--papier);padding:4px 0 8px;margin-bottom:2px;
+  width:100%;display:flex}
+.apercu .tuile{width:62%;min-width:170px;height:100px}
+.icones{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:8px;margin-bottom:10px}
+.ic{width:46px;height:46px;border-radius:12px;border:1px solid var(--trait);background:var(--papier);
+  font-size:24px;line-height:1;display:flex;align-items:center;justify-content:center;padding:0;
+  cursor:pointer;-webkit-tap-highlight-color:transparent}
+.ic.defaut{border-style:dashed}
+.ic.sel{box-shadow:0 0 0 2px var(--papier),0 0 0 4px var(--laiton);background:var(--laiton-fond)}
+.apercu .tuile{cursor:default}
 .apercu .tuile:active{transform:none}
 .etiq{display:block;font-weight:600;margin:16px 0 8px}
 .palette{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:12px 10px;margin-bottom:6px}
@@ -267,8 +275,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.4.1';
+var VERSION = '1.5.0';
 var HISTORIQUE = [
+  { v:'1.5.0', date:'7 oct. 2026', notes:[
+    'Icône personnalisable pour chaque tuile : grille d\'emojis, saisie libre d\'un autre emoji et retour à l\'icône par défaut, avec aperçu en direct fixé en haut de l\'éditeur.',
+    'L\'icône est mémorisée dans apps.json (passerelle-privatedata) avec le nom et la couleur, et suit l\'export/import ; elle apparaît aussi dans les listes.'
+  ]},
   { v:'1.4.1', date:'7 oct. 2026', notes:[
     'Export/import enrichi : en plus de la liste, il transporte le choix du Déployeur, les apps récentes et les noms/couleurs des tuiles ; l\'accueil est actualisé à l\'import.',
     'Le Déployeur est reconnu aussi quand le dépôt ou le fichier s\'appelle « deployer » ; le message d\'import détaille ce qui a été ajouté ou était déjà présent.'
@@ -420,7 +432,8 @@ function nettoyerPerso(obj){
     if(!p || typeof p !== 'object') return;
     var nom = typeof p.nom === 'string' ? p.nom.trim().slice(0, 24) : '';
     var couleur = (typeof p.couleur === 'string' && /^#[0-9a-f]{6}$/i.test(p.couleur)) ? p.couleur.toUpperCase() : '';
-    if(nom || couleur) out[id] = { nom: nom, couleur: couleur };
+    var icone = typeof p.icone === 'string' ? p.icone.trim().slice(0, 16) : '';
+    if(nom || couleur || icone) out[id] = { nom: nom, couleur: couleur, icone: icone };
   });
   return out;
 }
@@ -442,15 +455,24 @@ function couleurTuile(app){
   var p = etat.perso[idApp(app)];
   return (p && p.couleur) || '';
 }
-function iconeTuile(app){
+function iconeDefaut(app){
   if(idApp(app) === etat.deployeur) return (app.icone && app.icone !== '📄') ? app.icone : '🚀';
   return app.icone || '📄';
 }
-function enregistrerPerso(app, nom, couleur){
+function iconeTuile(app){
+  var p = etat.perso[idApp(app)];
+  return (p && p.icone) || iconeDefaut(app);
+}
+function iconePerso(app){
+  var p = etat.perso[idApp(app)];
+  return (p && p.icone) || app.icone || '📄';
+}
+function enregistrerPerso(app, nom, couleur, icone){
   var id = idApp(app);
   nom = (nom || '').trim().slice(0, 24);
-  if(!nom && !couleur) delete etat.perso[id];
-  else etat.perso[id] = { nom: nom, couleur: couleur || '' };
+  icone = (icone || '').trim().slice(0, 16);
+  if(!nom && !couleur && !icone) delete etat.perso[id];
+  else etat.perso[id] = { nom: nom, couleur: couleur || '', icone: icone };
   if(etat.attente.indexOf(id) < 0) etat.attente.push(id);
   sauverPersoLocal();
   rendreAccueil();
@@ -614,7 +636,7 @@ function rendreListe(){
     var b = document.createElement('button');
     b.type = 'button';
     b.className = 'ligne-app';
-    b.innerHTML = '<span class="ico">' + esc(app.icone || '📄') + '</span>' +
+    b.innerHTML = '<span class="ico">' + esc(iconePerso(app)) + '</span>' +
       '<span class="txt"><strong>' + esc(app.label) + '</strong><small>' +
       esc(app.repo + (app.file !== 'index.html' ? '/' + app.file : '')) + '</small></span>' +
       '<span class="chev" aria-hidden="true">›</span>';
@@ -980,7 +1002,7 @@ function ouvrirPerso(){
   var intro = document.createElement('p');
   intro.className = 'aide';
   intro.textContent = etat.apps.length
-    ? 'Choisis une app pour régler le nom et la couleur de sa tuile sur l\'accueil.'
+    ? 'Choisis une app pour régler le nom, la couleur et l\'icône de sa tuile sur l\'accueil.'
     : 'Ajoute d\'abord des apps (Découvrir ou Gérer).';
   c.appendChild(intro);
 
@@ -1019,18 +1041,22 @@ function ouvrirPerso(){
 
 function ouvrirEditeur(app){
   var id = idApp(app), p = etat.perso[id] || {};
-  var nom = p.nom || '', couleur = p.couleur || '';
+  var nom = p.nom || '', couleur = p.couleur || '', icone = p.icone || '';
   var estDep = (id === etat.deployeur);
   var defaut = estDep ? 'Déployeur' : app.label;
+  var defIcone = iconeDefaut(app);
 
   var c = document.createElement('div');
   c.innerHTML = '<div class="apercu" id="e-apercu"></div>' +
     '<label class="etiq" for="e-nom">Nom sur la tuile</label>' +
     '<input type="text" id="e-nom" maxlength="24" autocomplete="off" placeholder="' + esc(defaut) + '">' +
-    '<span class="etiq">Couleur</span><div class="palette" id="e-pal"></div>';
+    '<span class="etiq">Couleur</span><div class="palette" id="e-pal"></div>' +
+    '<span class="etiq">Icône</span><div class="icones" id="e-icones"></div>' +
+    '<input type="text" id="e-ico" maxlength="16" autocomplete="off" autocapitalize="off" ' +
+    'placeholder="Autre emoji : tape-le ou colle-le ici" aria-label="Autre emoji">';
   modal('Personnaliser la tuile', c, [
     { texte:'Annuler', action:ouvrirPerso },
-    { texte:'Enregistrer', classe:'primaire', action:function(){ apresEnregistrement(app, nom, couleur); } }
+    { texte:'Enregistrer', classe:'primaire', action:function(){ apresEnregistrement(app, nom, couleur, icone); } }
   ]);
 
   var champ = c.querySelector('#e-nom');
@@ -1038,7 +1064,7 @@ function ouvrirEditeur(app){
   function apercu(){
     var z = c.querySelector('#e-apercu');
     z.innerHTML = '';
-    z.appendChild(tuile(estDep && !couleur ? 'deploy' : '', esc(iconeTuile(app)),
+    z.appendChild(tuile(estDep && !couleur ? 'deploy' : '', esc(icone || defIcone),
       nom.trim() || defaut, app.repo, function(){}, null, couleur));
   }
   champ.addEventListener('input', function(){ nom = champ.value; apercu(); });
@@ -1086,12 +1112,37 @@ function ouvrirEditeur(app){
   inp.addEventListener('input', function(){ choisir(inp.value.toUpperCase()); });
   pal.appendChild(a); cells.push({ el:a, hex:'*' });
 
+  /* Icône : grille d'emojis + saisie libre */
+  var EMOJIS = ['🗺️','📍','🧭','🌍','🏠','🏔️','🌳','🌦️','✈️','🚗','🚶','🏃','📷','🖼️','🎵','🎬',
+    '📚','📖','📝','✏️','🔤','💬','🇫🇷','🇻🇳','📊','📈','🧮','🔧','⚙️','🛠️','🔑','🔒',
+    '🍷','🍽️','🛒','💶','🏷️','🎂','📅','⏰','📡','📹','🌐','🤖','🧠','🧩','🎯','⭐',
+    '❤️','👪','🌿','💡','🔔','📦','🗂️','📄'];
+  var grI = c.querySelector('#e-icones'), champI = c.querySelector('#e-ico'), cellsI = [];
+  function majSelI(){ cellsI.forEach(function(x){ x.el.classList.toggle('sel', x.val === icone); }); }
+  function choisirI(v){ icone = v; champI.value = v; majSelI(); apercu(); }
+
+  var di = document.createElement('button');
+  di.type = 'button'; di.className = 'ic defaut'; di.title = 'Icône par défaut';
+  di.setAttribute('aria-label', 'Icône par défaut'); di.textContent = defIcone;
+  di.onclick = function(){ choisirI(''); };
+  grI.appendChild(di); cellsI.push({ el:di, val:'' });
+  EMOJIS.forEach(function(em){
+    var b = document.createElement('button');
+    b.type = 'button'; b.className = 'ic'; b.textContent = em;
+    b.setAttribute('aria-label', 'Icône ' + em);
+    b.onclick = function(){ choisirI(em); };
+    grI.appendChild(b); cellsI.push({ el:b, val:em });
+  });
+  champI.value = icone;
+  champI.addEventListener('input', function(){ icone = champI.value.trim(); majSelI(); apercu(); });
+
   majSel();
+  majSelI();
   apercu();
 }
 
-async function apresEnregistrement(app, nom, couleur){
-  enregistrerPerso(app, nom, couleur);
+async function apresEnregistrement(app, nom, couleur, icone){
+  enregistrerPerso(app, nom, couleur, icone);
   if(!chargerTokenEcriture() && !etat.cleRefusee){
     demanderCleEcriture(true);
     return;
@@ -1146,7 +1197,7 @@ function ouvrirGerer(){
     ul.className = 'gestion';
     etat.apps.forEach(function(app, i){
       var li = document.createElement('li');
-      li.innerHTML = '<span class="ico">' + esc(app.icone || '📄') + '</span><span class="txt"><strong>' +
+      li.innerHTML = '<span class="ico">' + esc(iconePerso(app)) + '</span><span class="txt"><strong>' +
         esc(app.label) + '</strong><small>' +
         esc(app.repo + (app.file !== 'index.html' ? '/' + app.file : '')) + '</small></span>';
       var bs = document.createElement('span');
