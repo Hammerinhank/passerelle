@@ -34,7 +34,7 @@ h1{font:600 26px/1.1 ui-serif,"New York",Georgia,serif;margin:0;letter-spacing:-
   border:1.5px solid var(--laiton);background:var(--laiton-fond);color:var(--laiton);cursor:pointer}
 
 /* ----- Accueil : 8 grandes tuiles ----- */
-#vue-accueil{position:fixed;inset:0;z-index:3;background:var(--fond);display:flex;flex-direction:column;
+#vue-accueil{touch-action:pan-y;position:fixed;inset:0;z-index:3;background:var(--fond);display:flex;flex-direction:column;
   padding:calc(env(safe-area-inset-top,0px) + 56px) 18px calc(env(safe-area-inset-bottom,0px) + 80px)}
 .version-acc{position:absolute;top:calc(env(safe-area-inset-top,0px) + 12px);right:18px;
   font-size:13px;padding:7px 12px}
@@ -275,8 +275,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.5.0';
+var VERSION = '1.6.0';
 var HISTORIQUE = [
+  { v:'1.6.0', date:'8 oct. 2026', notes:[
+    'Accueil : on change de page en glissant le doigt (vers la gauche = page suivante, vers la droite = page précédente), avec une courte animation.',
+    'Les boutons « + » et « ‹ Retour » restent disponibles ; le geste est ignoré s\'il est trop court, trop lent ou plutôt vertical.'
+  ]},
   { v:'1.5.0', date:'7 oct. 2026', notes:[
     'Icône personnalisable pour chaque tuile : grille d\'emojis, saisie libre d\'un autre emoji et retour à l\'icône par défaut, avec aperçu en direct fixé en haut de l\'éditeur.',
     'L\'icône est mémorisée dans apps.json (passerelle-privatedata) avec le nom et la couleur, et suit l\'export/import ; elle apparaît aussi dans les listes.'
@@ -708,8 +712,37 @@ function rendreAccueil(){
   $('pied-page').textContent = total > 1 ? (p + 1) + ' / ' + total : '';
 }
 function changerPageAccueil(delta){
-  etat.pageAccueil += delta;
+  var total = nbPagesAccueil();
+  var cible = Math.max(0, Math.min(total - 1, etat.pageAccueil + delta));
+  if(cible === etat.pageAccueil) return;
+  etat.pageAccueil = cible;
   rendreAccueil();
+  try{
+    var g = $('grille');
+    var calme = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if(!calme && g.animate){
+      g.animate([{ transform: 'translateX(' + (delta > 0 ? 40 : -40) + 'px)', opacity: 0 },
+                 { transform: 'translateX(0)', opacity: 1 }], { duration: 200, easing: 'ease-out' });
+    }
+  }catch(e){}
+}
+/* Glisser le doigt sur l'accueil : vers la gauche = page suivante, vers la droite = page précédente. */
+function activerGlissement(){
+  var zone = $('vue-accueil'), x0 = 0, y0 = 0, t0 = 0, suivi = false;
+  zone.addEventListener('touchstart', function(e){
+    if(e.touches.length !== 1){ suivi = false; return; }
+    x0 = e.touches[0].clientX; y0 = e.touches[0].clientY; t0 = Date.now(); suivi = true;
+  }, { passive: true });
+  zone.addEventListener('touchend', function(e){
+    if(!suivi) return;
+    suivi = false;
+    var t = e.changedTouches[0];
+    var dx = t.clientX - x0, dy = t.clientY - y0;
+    if(Date.now() - t0 > 700) return;
+    if(Math.abs(dx) < 50 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+    changerPageAccueil(dx < 0 ? 1 : -1);
+  }, { passive: true });
+  zone.addEventListener('touchcancel', function(){ suivi = false; }, { passive: true });
 }
 function rendrePage1(g){
   g.appendChild(tuile('passerelle', SVG_CLE, 'Passerelle', 'Toutes mes apps', versListe));
@@ -1435,6 +1468,7 @@ function init(){
   $('b-perso').onclick = ouvrirPerso;
   $('b-decouvrir').onclick = ouvrirDecouvrir;
   $('b-accueil').onclick = function(){ etat.retour = 'accueil'; afficher('accueil'); };
+  activerGlissement();
   $('b-page-prec').onclick = function(){ changerPageAccueil(-1); };
   $('b-page-suiv').onclick = function(){ changerPageAccueil(1); };
   $('b-retour').onclick = fermerApp;
