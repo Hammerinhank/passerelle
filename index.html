@@ -284,8 +284,13 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.7.0';
+var VERSION = '1.7.1';
 var HISTORIQUE = [
+  { v:'1.7.1', date:'13 oct. 2026', notes:[
+    'Épinglage : l\'appui long dure maintenant 1 seconde au lieu de 0,5.',
+    'Correction : un appui long n\'ouvre plus l\'app. L\'accueil n\'est plus reconstruit pendant que le doigt est posé (la tuile disparaissait, et le clic suivant tombait sur une autre tuile qui avait pris sa place) ; la punaise s\'affiche sur place et la grille se met à jour au relâchement.',
+    'Correction : un seul épinglage par appui long, même si le doigt reste posé ou si plusieurs événements se produisent.'
+  ]},
   { v:'1.7.0', date:'13 oct. 2026', notes:[
     'Accueil, première page : un appui long sur une tuile d\'app (hors Passerelle et Déployeur) l\'épingle ; un nouvel appui long la désépingle. Une petite punaise 📌 marque les tuiles épinglées.',
     'Les tuiles épinglées gardent leur place en tête des 6 emplacements et ne sont plus chassées par les apps récentes ; elles sont mémorisées sur l\'appareil et suivent l\'export/import.'
@@ -333,7 +338,7 @@ var KEY_DEP     = 'passerelle_deployeur';
 var KEY_REC     = 'passerelle_recents';
 var KEY_PERSO   = 'passerelle_perso';
 var KEY_PIN     = 'passerelle_epingles';
-var DELAI_LONG  = 500;
+var DELAI_LONG  = 1000;
 var API = 'https://api.github.com';
 var DATA_REPO = 'passerelle-privatedata';
 var DATA_FILE = 'apps.json';
@@ -475,56 +480,94 @@ function toast(msg){
   clearTimeout(minuteurToast);
   minuteurToast = setTimeout(function(){ t.hidden = true; }, 2200);
 }
-function basculerEpingle(app){
+function majPunaise(el, app, epingle){
+  if(!el) return;
+  var pin = el.querySelector('.t-pin');
+  el.classList.toggle('epingle', epingle);
+  if(epingle){
+    el.setAttribute('aria-label', nomTuile(app) + ' (épinglée)');
+    if(!pin){
+      pin = document.createElement('span');
+      pin.className = 't-pin';
+      pin.setAttribute('aria-hidden', 'true');
+      pin.textContent = '📌';
+      el.appendChild(pin);
+    }
+  }else{
+    el.removeAttribute('aria-label');
+    if(pin) pin.remove();
+  }
+}
+/* Ne reconstruit PAS la grille ici : la tuile pressée doit rester en place jusqu'au relâchement du doigt. */
+function basculerEpingle(app, el){
   var id = idApp(app);
   var vibre = function(n){ try{ if(navigator.vibrate) navigator.vibrate(n); }catch(e){} };
   if(estEpingle(app)){
     etat.epingles = etat.epingles.filter(function(x){ return x !== id; });
     sauverEpingles();
     vibre(20);
+    majPunaise(el, app, false);
     toast('« ' + nomTuile(app) + ' » désépinglée');
   }else if(epinglesValides().length >= NB_RECENTS){
     vibre([30, 40, 30]);
     toast('Les ' + NB_RECENTS + ' emplacements sont déjà épinglés');
-    return;
   }else{
     etat.epingles = etat.epingles.filter(function(x){ return x !== id; }).concat([id]);
     sauverEpingles();
     vibre(30);
+    majPunaise(el, app, true);
     toast('« ' + nomTuile(app) + ' » épinglée 📌');
   }
-  rendreAccueil();
 }
-/* Appui long (≈ 0,5 s) sans bouger : déclenche l'action et neutralise le clic qui suivrait. */
+/* Appui long (DELAI_LONG) sans bouger : déclenche l'action, neutralise le clic qui suit,
+   et ne réorganise la grille qu'une fois le doigt relâché. État partagé : un seul geste à la fois. */
+var presse = { suppr:false, tSuppr:null, dernier:0, rendu:false, pointeur:null };
+function finPresse(){
+  presse.pointeur = null;
+  if(presse.suppr){
+    clearTimeout(presse.tSuppr);
+    presse.tSuppr = setTimeout(function(){ presse.suppr = false; }, 400);
+  }
+  if(presse.rendu){
+    presse.rendu = false;
+    setTimeout(function(){ rendreAccueil(); }, 250);
+  }
+}
 function appuiLong(el, action){
   var x0 = 0, y0 = 0, minuteur = null, actif = false;
-  var clic = el.onclick;
   function arreter(){
     clearTimeout(minuteur); minuteur = null; actif = false;
     el.classList.remove('appui');
   }
-  el.onclick = function(e){
-    if(el._long){ el._long = false; e.preventDefault(); return; }
-    if(clic) clic.call(el, e);
-  };
   el.addEventListener('pointerdown', function(e){
+    if(e.isPrimary === false) return;
     if(e.pointerType === 'mouse' && e.button !== 0) return;
-    el._long = false; actif = true;
+    if(presse.pointeur !== null) return;
+    presse.pointeur = e.pointerId;
+    presse.suppr = false;
+    actif = true;
     x0 = e.clientX; y0 = e.clientY;
     el.classList.add('appui');
     clearTimeout(minuteur);
     minuteur = setTimeout(function(){
       if(!actif) return;
-      el._long = true;
       arreter();
-      action();
+      if(Date.now() - presse.dernier < 1200) return;
+      presse.dernier = Date.now();
+      presse.suppr = true;
+      presse.rendu = true;
+      clearTimeout(presse.tSuppr);
+      action(el);
     }, DELAI_LONG);
   });
   el.addEventListener('pointermove', function(e){
     if(!actif) return;
     if(Math.abs(e.clientX - x0) > 10 || Math.abs(e.clientY - y0) > 10) arreter();
   });
-  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(n){ el.addEventListener(n, arreter); });
+  ['pointerup', 'pointercancel'].forEach(function(n){
+    el.addEventListener(n, function(){ arreter(); finPresse(); });
+  });
+  el.addEventListener('pointerleave', arreter);
   el.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 }
 
@@ -873,7 +916,7 @@ function rendrePage1(g){
           pin.textContent = '📌';
           t.appendChild(pin);
         }
-        appuiLong(t, function(){ basculerEpingle(app); });
+        appuiLong(t, function(el){ basculerEpingle(app, el); });
         g.appendChild(t);
       }else{
         g.appendChild(tuile('libre', '+', 'Emplacement libre', 'Ouvre une app pour l\'ajouter', versListe));
@@ -1590,6 +1633,9 @@ function init(){
   $('b-decouvrir').onclick = ouvrirDecouvrir;
   $('b-accueil').onclick = function(){ etat.retour = 'accueil'; afficher('accueil'); };
   activerGlissement();
+  $('grille').addEventListener('click', function(e){
+    if(presse.suppr){ presse.suppr = false; e.stopPropagation(); e.preventDefault(); }
+  }, true);
   $('b-page-prec').onclick = function(){ changerPageAccueil(-1); };
   $('b-page-suiv').onclick = function(){ changerPageAccueil(1); };
   $('b-retour').onclick = fermerApp;
