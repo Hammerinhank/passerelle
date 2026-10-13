@@ -44,6 +44,7 @@ h1{font:600 26px/1.1 ui-serif,"New York",Georgia,serif;margin:0;letter-spacing:-
   justify-content:space-between;align-items:flex-start;gap:8px;min-height:0;padding:16px;
   border-radius:24px;overflow:hidden;cursor:pointer;background:var(--papier);color:var(--encre);
   border:1px solid var(--trait);-webkit-tap-highlight-color:transparent;
+  -webkit-touch-callout:none;-webkit-user-select:none;user-select:none;
   transition:transform .12s ease}
 .tuile:active{transform:scale(.97)}
 .tuile:focus-visible{outline:2px solid var(--laiton);outline-offset:2px}
@@ -53,6 +54,12 @@ h1{font:600 26px/1.1 ui-serif,"New York",Georgia,serif;margin:0;letter-spacing:-
 .t-titre{font:600 clamp(16px,2.4vh,20px)/1.15 ui-serif,"New York",Georgia,serif;
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
 .t-sous{font-size:clamp(11px,1.5vh,13px);opacity:.72;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.t-pin{position:absolute;top:10px;right:12px;font-size:15px;line-height:1;pointer-events:none;
+  filter:drop-shadow(0 1px 1px rgba(0,0,0,.35))}
+.tuile.appui{transform:scale(.95)}
+#toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 96px);transform:translateX(-50%);
+  z-index:30;max-width:calc(100% - 36px);padding:10px 16px;border-radius:999px;background:var(--encre);
+  color:var(--fond);font-size:14px;font-weight:600;text-align:center;box-shadow:0 4px 14px rgba(0,0,0,.3)}
 .tuile.passerelle{background:var(--laiton);border-color:var(--laiton);color:var(--sur-laiton)}
 .tuile.deploy{background:var(--encre);border-color:var(--encre);color:var(--fond)}
 .tuile.libre{background:transparent;border:1.5px dashed var(--trait);color:var(--sec)}
@@ -268,6 +275,8 @@ details.guide a{color:var(--laiton)}
   </div>
 </div>
 
+<div id="toast" role="status" aria-live="polite" hidden></div>
+
 <noscript>Cette page a besoin de JavaScript.</noscript>
 
 <script>
@@ -275,8 +284,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.6.0';
+var VERSION = '1.7.0';
 var HISTORIQUE = [
+  { v:'1.7.0', date:'13 oct. 2026', notes:[
+    'Accueil, première page : un appui long sur une tuile d\'app (hors Passerelle et Déployeur) l\'épingle ; un nouvel appui long la désépingle. Une petite punaise 📌 marque les tuiles épinglées.',
+    'Les tuiles épinglées gardent leur place en tête des 6 emplacements et ne sont plus chassées par les apps récentes ; elles sont mémorisées sur l\'appareil et suivent l\'export/import.'
+  ]},
   { v:'1.6.0', date:'8 oct. 2026', notes:[
     'Accueil : on change de page en glissant le doigt (vers la gauche = page suivante, vers la droite = page précédente), avec une courte animation.',
     'Les boutons « + » et « ‹ Retour » restent disponibles ; le geste est ignoré s\'il est trop court, trop lent ou plutôt vertical.'
@@ -319,6 +332,8 @@ var KEY_APPS    = 'passerelle_apps';
 var KEY_DEP     = 'passerelle_deployeur';
 var KEY_REC     = 'passerelle_recents';
 var KEY_PERSO   = 'passerelle_perso';
+var KEY_PIN     = 'passerelle_epingles';
+var DELAI_LONG  = 500;
 var API = 'https://api.github.com';
 var DATA_REPO = 'passerelle-privatedata';
 var DATA_FILE = 'apps.json';
@@ -328,7 +343,7 @@ var PALETTE = [
   ['Sapin','#2E8B57'], ['Lagon','#00897B'], ['Bleu','#2F6FB5'], ['Indigo','#3949AB'],
   ['Prune','#7B4FA3'], ['Framboise','#B03A7A'], ['Noyer','#6D4C41'], ['Ardoise','#455A64']
 ];
-var etat = { token:null, login:null, apps:[], deployeur:null, recents:[],
+var etat = { token:null, login:null, apps:[], deployeur:null, recents:[], epingles:[],
              perso:{}, attente:[], sync:{ ok:null, msg:'' }, cleRefusee:false,
              pageAccueil:0, cible:null, appCourante:null, chargement:0, arret:false, retour:'accueil' };
 
@@ -425,6 +440,92 @@ function recentsValides(){
     if(a && id !== etat.deployeur && out.length < NB_RECENTS) out.push(a);
   });
   return out;
+}
+
+/* ---------- Tuiles épinglées (première page de l'accueil) ---------- */
+function chargerEpingles(){
+  try{
+    var r = JSON.parse(lsGet(KEY_PIN) || '[]');
+    return Array.isArray(r) ? r.filter(function(x){ return typeof x === 'string'; }) : [];
+  }catch(e){ return []; }
+}
+function sauverEpingles(){ lsSet(KEY_PIN, JSON.stringify(etat.epingles)); }
+function epinglesValides(){
+  var out = [];
+  etat.epingles.forEach(function(id){
+    var a = trouverApp(id);
+    if(a && id !== etat.deployeur && out.length < NB_RECENTS && out.indexOf(a) < 0) out.push(a);
+  });
+  return out;
+}
+function estEpingle(app){ return epinglesValides().indexOf(app) >= 0; }
+/* Première page : d'abord les apps épinglées, puis les récentes pour remplir les emplacements restants. */
+function tuilesPage1(){
+  var out = epinglesValides();
+  recentsValides().forEach(function(a){
+    if(out.length < NB_RECENTS && out.indexOf(a) < 0) out.push(a);
+  });
+  return out;
+}
+var minuteurToast = null;
+function toast(msg){
+  var t = $('toast');
+  t.textContent = msg;
+  t.hidden = false;
+  clearTimeout(minuteurToast);
+  minuteurToast = setTimeout(function(){ t.hidden = true; }, 2200);
+}
+function basculerEpingle(app){
+  var id = idApp(app);
+  var vibre = function(n){ try{ if(navigator.vibrate) navigator.vibrate(n); }catch(e){} };
+  if(estEpingle(app)){
+    etat.epingles = etat.epingles.filter(function(x){ return x !== id; });
+    sauverEpingles();
+    vibre(20);
+    toast('« ' + nomTuile(app) + ' » désépinglée');
+  }else if(epinglesValides().length >= NB_RECENTS){
+    vibre([30, 40, 30]);
+    toast('Les ' + NB_RECENTS + ' emplacements sont déjà épinglés');
+    return;
+  }else{
+    etat.epingles = etat.epingles.filter(function(x){ return x !== id; }).concat([id]);
+    sauverEpingles();
+    vibre(30);
+    toast('« ' + nomTuile(app) + ' » épinglée 📌');
+  }
+  rendreAccueil();
+}
+/* Appui long (≈ 0,5 s) sans bouger : déclenche l'action et neutralise le clic qui suivrait. */
+function appuiLong(el, action){
+  var x0 = 0, y0 = 0, minuteur = null, actif = false;
+  var clic = el.onclick;
+  function arreter(){
+    clearTimeout(minuteur); minuteur = null; actif = false;
+    el.classList.remove('appui');
+  }
+  el.onclick = function(e){
+    if(el._long){ el._long = false; e.preventDefault(); return; }
+    if(clic) clic.call(el, e);
+  };
+  el.addEventListener('pointerdown', function(e){
+    if(e.pointerType === 'mouse' && e.button !== 0) return;
+    el._long = false; actif = true;
+    x0 = e.clientX; y0 = e.clientY;
+    el.classList.add('appui');
+    clearTimeout(minuteur);
+    minuteur = setTimeout(function(){
+      if(!actif) return;
+      el._long = true;
+      arreter();
+      action();
+    }, DELAI_LONG);
+  });
+  el.addEventListener('pointermove', function(e){
+    if(!actif) return;
+    if(Math.abs(e.clientX - x0) > 10 || Math.abs(e.clientY - y0) > 10) arreter();
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(function(n){ el.addEventListener(n, arreter); });
+  el.addEventListener('contextmenu', function(e){ e.preventDefault(); });
 }
 
 /* ---------- Nom et couleur des tuiles ---------- */
@@ -757,12 +858,23 @@ function rendrePage1(g){
     }));
   }
 
-  var rec = recentsValides();
+  var rec = tuilesPage1();
   for(var i = 0; i < NB_RECENTS; i++){
     (function(app){
       if(app){
-        g.appendChild(tuile('', esc(iconeTuile(app)), nomTuile(app), app.repo,
-          function(){ ouvrirApp(app, 'accueil'); }, null, couleurTuile(app)));
+        var t = tuile('', esc(iconeTuile(app)), nomTuile(app), app.repo,
+          function(){ ouvrirApp(app, 'accueil'); }, null, couleurTuile(app));
+        if(estEpingle(app)){
+          t.classList.add('epingle');
+          t.setAttribute('aria-label', nomTuile(app) + ' (épinglée)');
+          var pin = document.createElement('span');
+          pin.className = 't-pin';
+          pin.setAttribute('aria-hidden', 'true');
+          pin.textContent = '📌';
+          t.appendChild(pin);
+        }
+        appuiLong(t, function(){ basculerEpingle(app); });
+        g.appendChild(t);
       }else{
         g.appendChild(tuile('libre', '+', 'Emplacement libre', 'Ouvre une app pour l\'ajouter', versListe));
       }
@@ -1287,7 +1399,7 @@ function ouvrirGerer(){
     var j = document.createElement('div');
     j.className = 'form';
     j.innerHTML = '<h4>Copier la liste vers un autre appareil</h4>' +
-      '<p class="aide">La liste, le Déployeur, les apps récentes et les tuiles personnalisées sont propres à chaque navigateur. Exporte-les ici, colle le texte sur l\'autre appareil et importe-le.</p>' +
+      '<p class="aide">La liste, le Déployeur, les apps récentes, les tuiles épinglées et les tuiles personnalisées sont propres à chaque navigateur. Exporte-les ici, colle le texte sur l\'autre appareil et importe-le.</p>' +
       '<textarea id="g-json" rows="4" spellcheck="false" aria-label="Liste au format JSON"></textarea>' +
       '<div class="rang"><button type="button" class="btn" id="g-exp">Exporter</button>' +
       '<button type="button" class="btn" id="g-imp">Importer (fusion)</button></div>' +
@@ -1296,12 +1408,13 @@ function ouvrirGerer(){
     $('g-exp').onclick = function(){
       var valides = etat.recents.filter(function(id){ return !!trouverApp(id); });
       var donnees = { version: 2, apps: etat.apps, deployeur: etat.deployeur || '',
-                      recents: valides, perso: etat.perso };
+                      recents: valides, perso: etat.perso, epingles: epinglesValides().map(idApp) };
       var z = $('g-json'); z.value = JSON.stringify(donnees, null, 1); z.focus(); z.select();
       $('g-jmsg').className = 'etat ok';
       $('g-jmsg').textContent = etat.apps.length + ' app(s) exportée(s), avec ' +
         (etat.deployeur ? 'le Déployeur, ' : '') + valides.length + ' récente(s) et ' +
-        Object.keys(etat.perso).length + ' tuile(s) personnalisée(s). Copie le texte ci-dessus.';
+        Object.keys(etat.perso).length + ' tuile(s) personnalisée(s) et ' + epinglesValides().length +
+        ' épinglée(s). Copie le texte ci-dessus.';
     };
     $('g-imp').onclick = function(){
       var m = $('g-jmsg');
@@ -1326,6 +1439,14 @@ function ouvrirGerer(){
               etat.recents = imp.concat(etat.recents.filter(function(x){ return imp.indexOf(x) < 0; })).slice(0, 12);
               lsSet(KEY_REC, JSON.stringify(etat.recents));
               infos.push(imp.length + ' récente(s)');
+            }
+          }
+          if(Array.isArray(brut.epingles)){
+            var ep = brut.epingles.filter(function(id){ return typeof id === 'string' && !!trouverApp(id); });
+            if(ep.length){
+              etat.epingles = etat.epingles.filter(function(x){ return ep.indexOf(x) < 0; }).concat(ep);
+              sauverEpingles();
+              infos.push(ep.length + ' épinglée(s)');
             }
           }
           if(brut.perso && typeof brut.perso === 'object'){
@@ -1479,6 +1600,7 @@ function init(){
   etat.apps = chargerApps();
   etat.deployeur = lsGet(KEY_DEP);
   etat.recents = chargerRecents();
+  etat.epingles = chargerEpingles();
   chargerPersoLocal();
   etat.cible = lireCible();
   var t = chargerToken();
