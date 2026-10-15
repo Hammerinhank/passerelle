@@ -88,6 +88,9 @@ input[type=password],input[type=text],textarea{
   width:100%;font-size:16px;line-height:1.3;padding:12px;border:1px solid var(--trait);
   border-radius:10px;background:var(--papier);color:var(--encre)}
 textarea{font-family:ui-monospace,Menlo,monospace;resize:vertical}
+.journal{margin:10px 0 0;padding:10px;max-height:46vh;overflow:auto;border:1px solid var(--trait);border-radius:10px;
+  background:var(--papier);font:12px/1.4 ui-monospace,Menlo,monospace;white-space:pre-wrap;word-break:break-word;
+  -webkit-user-select:text;user-select:text}
 label.case{display:flex;align-items:center;gap:10px;margin:12px 0;color:var(--sec);font-size:15px}
 label.case input{width:20px;height:20px;accent-color:var(--laiton)}
 
@@ -234,6 +237,7 @@ details.guide a{color:var(--laiton)}
       <button class="lien" id="b-decouvrir" type="button">Découvrir</button>
       <button class="lien" id="b-gerer" type="button">Gérer</button>
       <button class="lien" id="b-perso" type="button">Personnaliser</button>
+      <button class="lien" id="b-journal" type="button">Journal</button>
       <button class="lien" id="b-cle" type="button">Changer de clé</button>
     </div>
     <ul id="liste-apps"></ul>
@@ -284,8 +288,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.7.1';
+var VERSION = '1.8.0';
 var HISTORIQUE = [
+  { v:'1.8.0', date:'15 oct. 2026', notes:[
+    'Nouvelle page « Journal » (liste des apps > Journal) : événements horodatés conservés 3 jours, boutons Copier et RAZ. Elle sert à comprendre pourquoi une app ajoutée par Découvrir disparaît de la liste.',
+    'Le journal trace chaque enregistrement de la liste avec une relecture de contrôle, les écritures refusées par le navigateur, les modifications faites par un autre onglet ou par une app ouverte, l\'état du stockage au démarrage et toute perte d\'apps entre deux démarrages.'
+  ]},
   { v:'1.7.1', date:'13 oct. 2026', notes:[
     'Épinglage : l\'appui long dure maintenant 1 seconde au lieu de 0,5.',
     'Correction : un appui long n\'ouvre plus l\'app. L\'accueil n\'est plus reconstruit pendant que le doigt est posé (la tuile disparaissait, et le clic suivant tombait sur une autre tuile qui avait pris sa place) ; la punaise s\'affiche sur place et la grille se met à jour au relâchement.',
@@ -338,6 +346,10 @@ var KEY_DEP     = 'passerelle_deployeur';
 var KEY_REC     = 'passerelle_recents';
 var KEY_PERSO   = 'passerelle_perso';
 var KEY_PIN     = 'passerelle_epingles';
+var KEY_LOG     = 'passerelle_journal';
+var KEY_DERNIER = 'passerelle_dernier_etat';
+var LOG_JOURS   = 3;
+var LOG_MAX     = 1500;
 var DELAI_LONG  = 1000;
 var API = 'https://api.github.com';
 var DATA_REPO = 'passerelle-privatedata';
@@ -359,8 +371,90 @@ function esc(s){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
+/* ---------- Journal (3 jours) ---------- */
+var journal = [];
+var journalPersiste = true;
+var jAnti = {};
+function jPad(n, l){ n = String(n); while(n.length < (l || 2)) n = '0' + n; return n; }
+function jHorodatage(t){
+  var d = new Date(t);
+  return d.getFullYear() + '-' + jPad(d.getMonth() + 1) + '-' + jPad(d.getDate()) + ' ' +
+    jPad(d.getHours()) + ':' + jPad(d.getMinutes()) + ':' + jPad(d.getSeconds()) + '.' + jPad(d.getMilliseconds(), 3);
+}
+function jLireStocke(){
+  try{
+    var b = localStorage.getItem(KEY_LOG);
+    if(b === null) return null;
+    var a = JSON.parse(b);
+    return Array.isArray(a) ? a : null;
+  }catch(e){ return null; }
+}
+function jPurger(){
+  var lim = Date.now() - LOG_JOURS * 86400000, i = 0;
+  while(i < journal.length && journal[i].t < lim) i++;
+  if(i) journal.splice(0, i);
+  if(journal.length > LOG_MAX) journal.splice(0, journal.length - LOG_MAX);
+}
+function jSauver(){
+  for(var essai = 0; essai < 4; essai++){
+    try{ localStorage.setItem(KEY_LOG, JSON.stringify(journal)); journalPersiste = true; return; }
+    catch(e){
+      journalPersiste = false;
+      if(journal.length < 20) return;
+      journal.splice(0, Math.ceil(journal.length / 4));
+    }
+  }
+}
+function jLog(msg){
+  try{
+    var st = jLireStocke();
+    if(st) journal = st;
+    journal.push({ t: Date.now(), m: String(msg) });
+    jPurger();
+    jSauver();
+  }catch(e){}
+}
+function jRaz(){
+  journal = [];
+  try{ localStorage.setItem(KEY_LOG, '[]'); journalPersiste = true; }catch(e){ journalPersiste = false; }
+  jLog('Journal remis à zéro.');
+}
+function jTexte(){
+  var st = jLireStocke();
+  var l = st || journal;
+  return l.map(function(x){ return jHorodatage(x.t) + '  ' + x.m; }).join('\n');
+}
+function jTaille(v){ return v == null ? 'absent' : v.length + ' car.'; }
+function jCompter(brut){
+  if(brut == null) return -1;
+  try{ var a = JSON.parse(brut); return Array.isArray(a) ? a.length : -2; }catch(e){ return -2; }
+}
+function jEtatStockage(){
+  try{
+    var n = localStorage.length, total = 0, gros = [];
+    for(var i = 0; i < n; i++){
+      var k = localStorage.key(i), v = localStorage.getItem(k) || '';
+      total += k.length + v.length;
+      gros.push([k, v.length]);
+    }
+    gros.sort(function(a, b){ return b[1] - a[1]; });
+    return n + ' clé(s), ≈' + Math.round(total / 1024) + ' Ko (' + total + ' car.) ; plus grosses : ' +
+      gros.slice(0, 4).map(function(g){ return g[0] + ' ' + g[1]; }).join(', ');
+  }catch(e){ return 'localStorage inaccessible (' + (e && e.name) + ')'; }
+}
+function jIdsApps(brut){
+  try{ var a = JSON.parse(brut); return Array.isArray(a) ? a.map(function(x){ return x && x.repo ? x.repo + '|' + x.file : '?'; }) : []; }
+  catch(e){ return []; }
+}
 function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
-function lsSet(k,v){ try{ localStorage.setItem(k,v); return true; }catch(e){ return false; } }
+function lsSet(k,v){
+  try{ localStorage.setItem(k,v); return true; }
+  catch(e){
+    if(k !== KEY_LOG) jLog('ÉCHEC d\'écriture « ' + k + ' » (' + String(v).length + ' car.) : ' +
+      (e && e.name) + ' ' + (e && e.message) + ' | ' + jEtatStockage());
+    return false;
+  }
+}
 function lsDel(k){ try{ localStorage.removeItem(k); }catch(e){} }
 function ssGet(k){ try{ return sessionStorage.getItem(k); }catch(e){ return null; } }
 function ssSet(k,v){ try{ sessionStorage.setItem(k,v); }catch(e){} }
@@ -398,13 +492,51 @@ function trouverApp(id){
   var r = etat.apps.filter(function(a){ return idApp(a) === id; });
   return r.length ? r[0] : null;
 }
+var appsVuJson = null;
+var infoChargement = '';
 function chargerApps(){
+  var brut = lsGet(KEY_APPS);
+  appsVuJson = brut;
   try{
-    var a = JSON.parse(lsGet(KEY_APPS) || '[]');
-    return Array.isArray(a) ? a.filter(appValide) : [];
-  }catch(e){ return []; }
+    var a = JSON.parse(brut || '[]');
+    if(!Array.isArray(a)){ infoChargement = 'format inattendu (non tableau)'; return []; }
+    var ok = a.filter(appValide);
+    infoChargement = brut === null ? 'clé absente du stockage'
+      : a.length + ' entrée(s) lue(s), ' + ok.length + ' valide(s)' +
+        (ok.length < a.length ? ' — ' + (a.length - ok.length) + ' INVALIDE(S) écartée(s) : ' +
+          a.filter(function(x){ return !appValide(x); }).map(function(x){ return JSON.stringify(x); }).join(' ; ').slice(0, 400) : '');
+    return ok;
+  }catch(e){ infoChargement = 'JSON illisible : ' + (e && e.message) + ' (' + jTaille(brut) + ')'; return []; }
 }
-function sauverApps(){ lsSet(KEY_APPS, JSON.stringify(etat.apps)); }
+function sauverApps(raison){
+  var json = JSON.stringify(etat.apps);
+  var stocke = lsGet(KEY_APPS);
+  if(appsVuJson !== null || stocke !== null){
+    if(stocke !== appsVuJson){
+      jLog('DIVERGENCE avant écriture : le stockage contient ' + jCompter(stocke) + ' app(s) alors que la mémoire en attendait ' +
+        jCompter(appsVuJson) + ' (modifié par un autre onglet ou par une app ouverte). Stockage : ' + jIdsApps(stocke).join(', '));
+    }
+  }
+  var ecrit = lsSet(KEY_APPS, json);
+  var rel = lsGet(KEY_APPS);
+  var verifie = ecrit && rel === json;
+  jLog('Liste enregistrée (' + (raison || 'sans précision') + ') : ' + etat.apps.length + ' app(s) — écriture ' +
+    (ecrit ? 'acceptée' : 'REFUSÉE') + ', relecture ' + (verifie ? 'OK' : 'DIFFÉRENTE (' + jCompter(rel) + ' app(s) relue(s))') + '.');
+  if(verifie){
+    appsVuJson = json;
+    lsSet(KEY_DERNIER, JSON.stringify({ t: Date.now(), n: etat.apps.length, ids: etat.apps.map(idApp) }));
+  }else{
+    try{ toast('⚠ La liste n\'a pas pu être enregistrée (voir Journal)'); }catch(e){}
+  }
+  return verifie;
+}
+function controlerCoherence(contexte){
+  var stocke = lsGet(KEY_APPS);
+  if(stocke !== appsVuJson){
+    jLog('INCOHÉRENCE (' + contexte + ') : le stockage contient ' + jCompter(stocke) + ' app(s), la mémoire ' +
+      jCompter(appsVuJson) + '. Stockage : ' + jIdsApps(stocke).join(', '));
+  }
+}
 function dejaPresent(repo, file){
   return etat.apps.some(function(a){ return a.repo === repo && a.file === file; });
 }
@@ -421,10 +553,11 @@ function definirDeployeur(app){
   etat.deployeur = app ? idApp(app) : null;
   if(app) lsSet(KEY_DEP, etat.deployeur); else lsDel(KEY_DEP);
 }
-function ajouterApp(app){
+function ajouterApp(app, origine){
   etat.apps.push(app);
+  jLog('Ajout de « ' + app.repo + ' / ' + app.file + ' » (' + (origine || 'inconnu') + '), ' + etat.apps.length + ' app(s) en mémoire.');
   if(!trouverApp(etat.deployeur || '') && ressembleDeployeur(app)) definirDeployeur(app);
-  sauverApps();
+  sauverApps('ajout ' + (origine || ''));
   rendreListe();
 }
 function chargerRecents(){
@@ -702,6 +835,7 @@ async function synchroniserPerso(){
     }catch(e){ derniere = e; }
   }
   etat.sync = { ok: false, msg: messageErreur(derniere) + ' Les réglages restent sur cet appareil.' };
+  jLog('Synchronisation des tuiles : échec — ' + messageErreur(derniere));
   majStatutPerso();
 }
 async function pousser(){
@@ -1000,6 +1134,7 @@ async function demarrerAvecToken(token){
   }
 }
 function deconnecter(){
+  jLog('Changement de clé : clé effacée.');
   effacerToken();
   etat.token = null; etat.login = null;
   $('cle-msg').textContent = '';
@@ -1127,6 +1262,7 @@ async function ouvrirApp(app, retour){
   $('app-titre').textContent = app.label;
   $('cadre').srcdoc = '';
   afficher('app');
+  jLog('Ouverture de « ' + idApp(app) + ' » (' + (retour || etat.retour) + ').');
   messageApp('Chargement depuis GitHub…', false, false);
   try{
     var res = await api('/repos/' + app.repo + '/contents/' + encChemin(app.file), RAW);
@@ -1138,11 +1274,13 @@ async function ouvrirApp(app, retour){
     if(idApp(app) !== etat.deployeur) noterRecent(app);
   }catch(e){
     if(n !== etat.chargement) return;
+    jLog('Ouverture de « ' + idApp(app) + ' » ÉCHEC : ' + messageErreur(e) + (e.status === 401 ? ' — clé effacée.' : ''));
     if(e.status === 401) effacerToken();
     messageApp(messageErreur(e), true, true);
   }
 }
 function fermerApp(){
+  controlerCoherence('retour depuis une app');
   etat.chargement++;
   etat.appCourante = null;
   $('cadre').srcdoc = '';
@@ -1399,6 +1537,7 @@ function ouvrirGerer(){
         b.onclick = function(){
           if(d[2] === 0){
             if(estDep) definirDeployeur(null);
+            jLog('Retrait manuel de « ' + idApp(app) + ' » (Gérer ✕).');
             etat.apps.splice(i, 1);
           }else if(d[2] === 2){
             definirDeployeur(estDep ? null : app);
@@ -1407,7 +1546,7 @@ function ouvrirGerer(){
             if(j < 0 || j >= etat.apps.length) return;
             var t = etat.apps[i]; etat.apps[i] = etat.apps[j]; etat.apps[j] = t;
           }
-          sauverApps(); rendreListe(); rendre();
+          sauverApps(d[2] === 0 ? 'retrait' : d[2] === 2 ? 'déployeur' : 'déplacement'); rendreListe(); rendre();
         };
         bs.appendChild(b);
       });
@@ -1435,7 +1574,7 @@ function ouvrirGerer(){
       ajouterApp({
         label: $('g-label').value.trim() || nomLisible(repo, file),
         repo: repo, file: file, icone: $('g-ico').value.trim() || '📄'
-      });
+      }, 'Gérer, saisie manuelle');
       rendre();
     };
 
@@ -1470,7 +1609,7 @@ function ouvrirGerer(){
         liste.forEach(function(x){
           if(!appValide(x)){ ignores++; return; }
           if(dejaPresent(x.repo, x.file)){ presentes++; return; }
-          ajouterApp({ label: x.label || nomLisible(x.repo, x.file), repo: x.repo, file: x.file, icone: x.icone || '📄' });
+          ajouterApp({ label: x.label || nomLisible(x.repo, x.file), repo: x.repo, file: x.file, icone: x.icone || '📄' }, 'import');
           ajoutes++;
         });
         if(!Array.isArray(brut)){
@@ -1506,7 +1645,7 @@ function ouvrirGerer(){
           var d = etat.apps.filter(ressembleDeployeur)[0];
           if(d){ definirDeployeur(d); infos.push('Déployeur reconnu : ' + d.label); }
         }
-        sauverApps(); rendreListe(); rendreAccueil();
+        sauverApps('import'); rendreListe(); rendreAccueil();
         rendre();
         $('g-json').value = saisie;
         $('g-jmsg').className = 'etat ok';
@@ -1562,7 +1701,8 @@ function ajouterResultats(r, fichiers){
       b.disabled = d;
     }
     b.onclick = function(){
-      ajouterApp({ label: nomLisible(r.full_name, f), repo: r.full_name, file: f, icone: '📄' });
+      jLog('Découvrir : clic sur « Ajouter » pour ' + r.full_name + ' / ' + f + '.');
+      ajouterApp({ label: nomLisible(r.full_name, f), repo: r.full_name, file: f, icone: '📄' }, 'Découvrir');
       maj();
     };
     maj();
@@ -1587,7 +1727,9 @@ function ouvrirDecouvrir(){
     prog.className = 'etat';
     try{
       prog.textContent = 'Liste des dépôts…';
+      jLog('Découvrir : scan lancé (' + etat.apps.length + ' app(s) déjà en liste).');
       var repos = await listerRepos();
+      jLog('Découvrir : ' + repos.length + ' dépôt(s) accessible(s).');
       var total = repos.length, fait = 0, trouves = 0, illisibles = 0, idx = 0;
       var worker = async function(){
         while(!etat.arret){
@@ -1597,22 +1739,126 @@ function ouvrirDecouvrir(){
           try{
             var fichiers = await htmlRacine(r.full_name);
             if(fichiers.length){ trouves += fichiers.length; ajouterResultats(r, fichiers); }
-          }catch(e){ illisibles++; }
+          }catch(e){ illisibles++; if(illisibles <= 5) jLog('Découvrir : dépôt illisible ' + r.full_name + ' — ' + messageErreur(e)); }
           fait++;
           prog.textContent = 'Analyse ' + fait + ' / ' + total + ' (' + (total - fait) + ' restants) : ' +
             trouves + ' fichier(s) HTML trouvé(s)';
         }
       };
       await Promise.all([worker(), worker(), worker(), worker()]);
+      jLog('Découvrir : scan ' + (etat.arret ? 'arrêté' : 'terminé') + ', ' + fait + '/' + total + ' dépôts, ' + trouves + ' fichier(s) HTML, ' + illisibles + ' illisible(s).');
       prog.textContent = (etat.arret ? 'Arrêté : ' : 'Terminé : ') + fait + ' / ' + total +
         ' dépôts analysés, ' + trouves + ' fichier(s) HTML trouvé(s)' +
         (illisibles ? ', ' + illisibles + ' dépôt(s) illisible(s) (vides ou sans accès).' : '.');
     }catch(e){
       prog.className = 'etat erreur';
       prog.textContent = messageErreur(e);
+      jLog('Découvrir : erreur — ' + messageErreur(e));
     }
     go.disabled = false; stop.hidden = true;
   };
+}
+
+/* ---------- Journal ---------- */
+function ouvrirJournal(){
+  var c = document.createElement('div');
+  c.innerHTML = '<p class="aide">Événements des ' + LOG_JOURS + ' derniers jours (heure locale), les plus récents en bas. Après un incident, touche « Copier » et colle le texte dans la conversation.</p>' +
+    '<div class="rang"><button type="button" class="btn primaire" id="j-copier">Copier</button>' +
+    '<button type="button" class="btn" id="j-maj">Actualiser</button>' +
+    '<button type="button" class="btn" id="j-raz">RAZ</button></div>' +
+    '<p class="etat" id="j-msg" role="status"></p>' +
+    '<pre class="journal" id="j-txt" tabindex="0"></pre>';
+  modal('Journal', c, [{ texte:'Fermer' }]);
+  function afficherJ(){
+    var t = jTexte();
+    var z = $('j-txt');
+    z.textContent = t || '(journal vide)';
+    var nb = t ? t.split('\n').length : 0;
+    var m = $('j-msg');
+    m.className = 'etat' + (journalPersiste ? '' : ' erreur');
+    m.textContent = nb + ' ligne(s)' + (journalPersiste ? '.' : ' — ATTENTION : le journal n\'a pas pu être écrit dans le stockage de l\'appareil (plein ou refusé).');
+    z.scrollTop = z.scrollHeight;
+  }
+  $('j-maj').onclick = afficherJ;
+  $('j-raz').onclick = function(){
+    if(!window.confirm('Effacer tout le journal ?')) return;
+    jRaz(); afficherJ();
+  };
+  $('j-copier').onclick = async function(){
+    var t = jTexte(), m = $('j-msg'), ok = false;
+    try{ await navigator.clipboard.writeText(t); ok = true; }catch(e){}
+    if(!ok){
+      try{
+        var ta = document.createElement('textarea');
+        ta.value = t; ta.setAttribute('readonly', '');
+        ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+        document.body.appendChild(ta); ta.select(); ta.setSelectionRange(0, t.length);
+        ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+      }catch(e){}
+    }
+    m.className = 'etat ' + (ok ? 'ok' : 'erreur');
+    m.textContent = ok ? 'Journal copié dans le presse-papiers.' : 'Copie impossible : sélectionne le texte ci-dessous à la main.';
+  };
+  afficherJ();
+}
+
+/* ---------- Surveillance du stockage ---------- */
+function surveillerStockage(){
+  window.addEventListener('storage', function(e){
+    if(e.key === KEY_LOG) return;
+    if(e.key === null){ jLog('ÉVÉNEMENT : le stockage a été VIDÉ (clear) par un autre onglet ou une app ouverte.'); return; }
+    var propre = e.key.indexOf('passerelle_') === 0;
+    if(e.key === KEY_APPS){
+      jLog('ÉVÉNEMENT : « ' + e.key + ' » modifié par un autre document : ' + jCompter(e.oldValue) + ' → ' + jCompter(e.newValue) +
+        ' app(s). Nouveau contenu : ' + jIdsApps(e.newValue).join(', '));
+    }else if(propre){
+      if(e.key === KEY_TOKEN || e.key === KEY_TOKEN_W) jLog('ÉVÉNEMENT : « ' + e.key + ' » modifiée par un autre document (' + jTaille(e.oldValue) + ' → ' + jTaille(e.newValue) + ').');
+      else jLog('ÉVÉNEMENT : « ' + e.key + ' » modifiée par un autre document (' + jTaille(e.oldValue) + ' → ' + jTaille(e.newValue) + ').');
+    }else{
+      var now = Date.now();
+      if(!jAnti[e.key] || now - jAnti[e.key] > 60000){
+        jAnti[e.key] = now;
+        jLog('ÉVÉNEMENT : clé étrangère « ' + e.key + ' » écrite par une app ou un onglet (' + jTaille(e.oldValue) + ' → ' + jTaille(e.newValue) + ').');
+      }
+    }
+  });
+  document.addEventListener('visibilitychange', function(){
+    jLog('Page ' + (document.hidden ? 'masquée' : 'de nouveau visible') + '.');
+    if(!document.hidden) controlerCoherence('retour au premier plan');
+  });
+  window.addEventListener('pageshow', function(e){ if(e.persisted){ jLog('Page restaurée depuis le cache du navigateur.'); controlerCoherence('restauration'); } });
+  window.addEventListener('pagehide', function(e){ jLog('Page quittée' + (e.persisted ? ' (mise en cache)' : '') + ' ; ' + etat.apps.length + ' app(s) en mémoire.'); });
+  window.addEventListener('error', function(e){ jLog('ERREUR JS : ' + e.message + ' (' + (e.filename || '').split('/').pop() + ':' + e.lineno + ')'); });
+  window.addEventListener('unhandledrejection', function(e){ jLog('PROMESSE REJETÉE : ' + (e.reason && e.reason.message ? e.reason.message : e.reason)); });
+}
+function journaliserDemarrage(){
+  var standalone = false;
+  try{ standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }catch(e){}
+  jLog('──── Démarrage v' + VERSION + ' ; ' + (standalone ? 'application installée' : 'navigateur') + ' ; ' + navigator.userAgent);
+  jLog('Apps : ' + infoChargement + ' ; ' + etat.apps.length + ' en liste ; ' + etat.epingles.length + ' épinglée(s) ; ' + etat.recents.length + ' récente(s) ; clé ' + (etat.token ? 'présente' : 'absente') + '.');
+  jLog('Stockage : ' + jEtatStockage());
+  try{
+    var d = JSON.parse(lsGet(KEY_DERNIER) || 'null');
+    if(d && typeof d.n === 'number'){
+      var ids = etat.apps.map(idApp);
+      var manque = (d.ids || []).filter(function(id){ return ids.indexOf(id) < 0; });
+      if(manque.length) jLog('PERTE DÉTECTÉE : au dernier enregistrement (' + jHorodatage(d.t) + ') la liste avait ' + d.n + ' app(s) ; il en manque ' + manque.length + ' : ' + manque.join(', '));
+      else jLog('Contrôle : liste identique au dernier enregistrement (' + jHorodatage(d.t) + ', ' + d.n + ' app(s)).');
+    }else{
+      jLog('Contrôle : aucun enregistrement antérieur connu (premier démarrage de cette version ou stockage vidé).');
+    }
+  }catch(e){}
+  try{
+    if(navigator.storage && navigator.storage.estimate){
+      navigator.storage.estimate().then(function(r){
+        jLog('Quota navigateur : ' + Math.round((r.usage || 0) / 1024) + ' Ko utilisés sur ' + Math.round((r.quota || 0) / 1048576) + ' Mo.');
+      });
+    }
+    if(navigator.storage && navigator.storage.persisted){
+      navigator.storage.persisted().then(function(p){ jLog('Stockage persistant accordé : ' + (p ? 'oui' : 'non') + '.'); });
+    }
+  }catch(e){}
 }
 
 /* ---------- Démarrage ---------- */
@@ -1631,6 +1877,7 @@ function init(){
   $('b-gerer').onclick = ouvrirGerer;
   $('b-perso').onclick = ouvrirPerso;
   $('b-decouvrir').onclick = ouvrirDecouvrir;
+  $('b-journal').onclick = ouvrirJournal;
   $('b-accueil').onclick = function(){ etat.retour = 'accueil'; afficher('accueil'); };
   activerGlissement();
   $('grille').addEventListener('click', function(e){
@@ -1649,6 +1896,8 @@ function init(){
   etat.epingles = chargerEpingles();
   chargerPersoLocal();
   etat.cible = lireCible();
+  surveillerStockage();
+  journaliserDemarrage();
   var t = chargerToken();
   if(t) demarrerAvecToken(t);
   else{
