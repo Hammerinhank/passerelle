@@ -288,8 +288,12 @@ details.guide a{color:var(--laiton)}
 'use strict';
 
 /* ---------- Version et historique ---------- */
-var VERSION = '1.8.0';
+var VERSION = '1.8.1';
 var HISTORIQUE = [
+  { v:'1.8.1', date:'15 oct. 2026', notes:[
+    'Correction de la disparition des apps ajoutées : le stockage du navigateur (localStorage), partagé avec toutes tes autres apps du même site, était plein, donc la liste ne pouvait plus grossir et l\'ajout se perdait au redémarrage.',
+    'La liste, le Déployeur, les récentes, les épinglées, les tuiles personnalisées et le journal sont maintenant enregistrés dans IndexedDB (espace séparé et bien plus grand) ; les données existantes sont reprises automatiquement au premier lancement. Un avertissement apparaît si une écriture échoue.'
+  ]},
   { v:'1.8.0', date:'15 oct. 2026', notes:[
     'Nouvelle page « Journal » (liste des apps > Journal) : événements horodatés conservés 3 jours, boutons Copier et RAZ. Elle sert à comprendre pourquoi une app ajoutée par Découvrir disparaît de la liste.',
     'Le journal trace chaque enregistrement de la liste avec une relecture de contrôle, les écritures refusées par le navigateur, les modifications faites par un autre onglet ou par une app ouverte, l\'état du stockage au démarrage et toute perte d\'apps entre deux démarrages.'
@@ -371,6 +375,105 @@ function esc(s){
     return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
   });
 }
+/* ---------- Stockage des données de Passerelle : IndexedDB (localStorage est partagé avec les autres apps et peut être plein) ---------- */
+var KV_CLES = [KEY_APPS, KEY_DEP, KEY_REC, KEY_PERSO, KEY_PIN, KEY_DERNIER, KEY_LOG];
+var kvCache = {}, kvMode = 'ls', kvDb = null, kvPret = false;
+function kvOuvrir(){
+  return new Promise(function(res, rej){
+    var r = indexedDB.open('passerelle', 1);
+    r.onupgradeneeded = function(){ r.result.createObjectStore('kv'); };
+    r.onsuccess = function(){ res(r.result); };
+    r.onerror = function(){ rej(r.error || new Error('ouverture refusée')); };
+    r.onblocked = function(){ rej(new Error('ouverture bloquée')); };
+  });
+}
+function kvLireTout(db){
+  return new Promise(function(res, rej){
+    var out = {}, tx = db.transaction('kv', 'readonly'), c = tx.objectStore('kv').openCursor();
+    c.onsuccess = function(){ var cur = c.result; if(cur){ out[cur.key] = cur.value; cur.continue(); } };
+    tx.oncomplete = function(){ res(out); };
+    tx.onerror = tx.onabort = function(){ rej(tx.error || new Error('lecture annulée')); };
+  });
+}
+function kvEcrireIdb(k, v){
+  return new Promise(function(res, rej){
+    var tx;
+    try{ tx = kvDb.transaction('kv', 'readwrite'); }catch(e){ rej(e); return; }
+    if(v === null) tx.objectStore('kv').delete(k); else tx.objectStore('kv').put(v, k);
+    tx.oncomplete = function(){ res(); };
+    tx.onerror = tx.onabort = function(){ rej(tx.error || new Error('écriture annulée')); };
+  });
+}
+function kvGet(k){ return Object.prototype.hasOwnProperty.call(kvCache, k) ? kvCache[k] : null; }
+/* Renvoie une promesse : true si l'écriture est confirmée. La valeur est déjà lisible via kvGet. */
+function kvSet(k, v){
+  if(v === null) delete kvCache[k]; else kvCache[k] = v;
+  if(kvMode === 'idb'){
+    return kvEcrireIdb(k, v).then(function(){ return true; }, function(e){
+      var ok = (v === null) ? (lsDel(k), true) : lsSet(k, v);
+      jLog('ÉCHEC IndexedDB pour « ' + k + ' » : ' + (e && (e.name + ' ' + e.message)) + ' ; repli localStorage : ' + (ok ? 'accepté' : 'REFUSÉ'));
+      return ok;
+    });
+  }
+  return Promise.resolve(v === null ? (lsDel(k), true) : lsSet(k, v));
+}
+function kvDel(k){ return kvSet(k, null); }
+function kvChargerLs(){
+  KV_CLES.forEach(function(k){ var v = lsGet(k); if(v !== null) kvCache[k] = v; });
+}
+function kvCharger(){
+  return new Promise(function(resolve){
+    var fait = false;
+    function terminer(){
+      if(fait) return;
+      fait = true; kvPret = true;
+      try{
+        var st = null;
+        try{ st = JSON.parse(kvCache[KEY_LOG] || 'null'); }catch(e){}
+        if(Array.isArray(st)) journal = st.concat(journal);
+        jPurger();
+      }catch(e){}
+      resolve();
+    }
+    var minuteur = setTimeout(function(){
+      if(fait) return;
+      kvMode = 'ls'; kvChargerLs();
+      jLog('IndexedDB ne répond pas (3 s) : repli sur localStorage.');
+      terminer();
+    }, 3000);
+    function repli(e){
+      if(fait) return;
+      clearTimeout(minuteur);
+      kvMode = 'ls'; kvChargerLs();
+      jLog('IndexedDB indisponible (' + (e && (e.name + ' ' + e.message)) + ') : repli sur localStorage.');
+      terminer();
+    }
+    try{
+      if(!window.indexedDB) throw new Error('absent');
+      kvOuvrir().then(function(db){
+        return kvLireTout(db).then(function(tout){
+          if(fait) return;
+          clearTimeout(minuteur);
+          kvDb = db; kvMode = 'idb';
+          var migres = [];
+          KV_CLES.forEach(function(k){
+            if(typeof tout[k] === 'string'){ kvCache[k] = tout[k]; return; }
+            var v = lsGet(k);
+            if(v !== null){
+              kvCache[k] = v;
+              migres.push(k);
+              kvEcrireIdb(k, v).then(function(){ lsDel(k); jLog('Migration vers IndexedDB confirmée : « ' + k + ' » (' + v.length + ' car.) ; ancienne copie localStorage supprimée.'); },
+                function(e){ jLog('Migration vers IndexedDB ÉCHOUÉE pour « ' + k + ' » : ' + (e && e.message)); });
+            }
+          });
+          jLog('Stockage des données : IndexedDB ouvert' + (migres.length ? ' ; migration depuis localStorage : ' + migres.join(', ') : '') + '.');
+          terminer();
+        });
+      }).catch(repli);
+    }catch(e){ repli(e); }
+  });
+}
+
 /* ---------- Journal (3 jours) ---------- */
 var journal = [];
 var journalPersiste = true;
@@ -381,34 +484,25 @@ function jHorodatage(t){
   return d.getFullYear() + '-' + jPad(d.getMonth() + 1) + '-' + jPad(d.getDate()) + ' ' +
     jPad(d.getHours()) + ':' + jPad(d.getMinutes()) + ':' + jPad(d.getSeconds()) + '.' + jPad(d.getMilliseconds(), 3);
 }
-function jLireStocke(){
-  try{
-    var b = localStorage.getItem(KEY_LOG);
-    if(b === null) return null;
-    var a = JSON.parse(b);
-    return Array.isArray(a) ? a : null;
-  }catch(e){ return null; }
-}
 function jPurger(){
   var lim = Date.now() - LOG_JOURS * 86400000, i = 0;
   while(i < journal.length && journal[i].t < lim) i++;
   if(i) journal.splice(0, i);
   if(journal.length > LOG_MAX) journal.splice(0, journal.length - LOG_MAX);
 }
-function jSauver(){
-  for(var essai = 0; essai < 4; essai++){
-    try{ localStorage.setItem(KEY_LOG, JSON.stringify(journal)); journalPersiste = true; return; }
-    catch(e){
-      journalPersiste = false;
-      if(journal.length < 20) return;
-      journal.splice(0, Math.ceil(journal.length / 4));
-    }
-  }
+var jMinuteur = null;
+function jEcrire(){
+  jMinuteur = null;
+  if(!kvPret) return;
+  kvSet(KEY_LOG, JSON.stringify(journal)).then(function(ok){ journalPersiste = ok; });
+}
+function jSauver(immediat){
+  if(!kvPret) return;
+  if(immediat){ clearTimeout(jMinuteur); jEcrire(); return; }
+  if(jMinuteur === null) jMinuteur = setTimeout(jEcrire, 400);
 }
 function jLog(msg){
   try{
-    var st = jLireStocke();
-    if(st) journal = st;
     journal.push({ t: Date.now(), m: String(msg) });
     jPurger();
     jSauver();
@@ -416,13 +510,11 @@ function jLog(msg){
 }
 function jRaz(){
   journal = [];
-  try{ localStorage.setItem(KEY_LOG, '[]'); journalPersiste = true; }catch(e){ journalPersiste = false; }
   jLog('Journal remis à zéro.');
+  jSauver(true);
 }
 function jTexte(){
-  var st = jLireStocke();
-  var l = st || journal;
-  return l.map(function(x){ return jHorodatage(x.t) + '  ' + x.m; }).join('\n');
+  return journal.map(function(x){ return jHorodatage(x.t) + '  ' + x.m; }).join('\n');
 }
 function jTaille(v){ return v == null ? 'absent' : v.length + ' car.'; }
 function jCompter(brut){
@@ -492,16 +584,14 @@ function trouverApp(id){
   var r = etat.apps.filter(function(a){ return idApp(a) === id; });
   return r.length ? r[0] : null;
 }
-var appsVuJson = null;
 var infoChargement = '';
 function chargerApps(){
-  var brut = lsGet(KEY_APPS);
-  appsVuJson = brut;
+  var brut = kvGet(KEY_APPS);
   try{
     var a = JSON.parse(brut || '[]');
     if(!Array.isArray(a)){ infoChargement = 'format inattendu (non tableau)'; return []; }
     var ok = a.filter(appValide);
-    infoChargement = brut === null ? 'clé absente du stockage'
+    infoChargement = brut === null ? 'aucune liste enregistrée'
       : a.length + ' entrée(s) lue(s), ' + ok.length + ' valide(s)' +
         (ok.length < a.length ? ' — ' + (a.length - ok.length) + ' INVALIDE(S) écartée(s) : ' +
           a.filter(function(x){ return !appValide(x); }).map(function(x){ return JSON.stringify(x); }).join(' ; ').slice(0, 400) : '');
@@ -509,33 +599,15 @@ function chargerApps(){
   }catch(e){ infoChargement = 'JSON illisible : ' + (e && e.message) + ' (' + jTaille(brut) + ')'; return []; }
 }
 function sauverApps(raison){
-  var json = JSON.stringify(etat.apps);
-  var stocke = lsGet(KEY_APPS);
-  if(appsVuJson !== null || stocke !== null){
-    if(stocke !== appsVuJson){
-      jLog('DIVERGENCE avant écriture : le stockage contient ' + jCompter(stocke) + ' app(s) alors que la mémoire en attendait ' +
-        jCompter(appsVuJson) + ' (modifié par un autre onglet ou par une app ouverte). Stockage : ' + jIdsApps(stocke).join(', '));
+  var json = JSON.stringify(etat.apps), n = etat.apps.length;
+  kvSet(KEY_APPS, json).then(function(ok){
+    jLog('Liste enregistrée (' + (raison || 'sans précision') + ') : ' + n + ' app(s) — ' + kvMode.toUpperCase() +
+      ', écriture ' + (ok ? 'confirmée' : 'REFUSÉE'));
+    if(!ok){
+      try{ toast('⚠ La liste n\'a pas pu être enregistrée (voir Journal)'); }catch(e){}
     }
-  }
-  var ecrit = lsSet(KEY_APPS, json);
-  var rel = lsGet(KEY_APPS);
-  var verifie = ecrit && rel === json;
-  jLog('Liste enregistrée (' + (raison || 'sans précision') + ') : ' + etat.apps.length + ' app(s) — écriture ' +
-    (ecrit ? 'acceptée' : 'REFUSÉE') + ', relecture ' + (verifie ? 'OK' : 'DIFFÉRENTE (' + jCompter(rel) + ' app(s) relue(s))') + '.');
-  if(verifie){
-    appsVuJson = json;
-    lsSet(KEY_DERNIER, JSON.stringify({ t: Date.now(), n: etat.apps.length, ids: etat.apps.map(idApp) }));
-  }else{
-    try{ toast('⚠ La liste n\'a pas pu être enregistrée (voir Journal)'); }catch(e){}
-  }
-  return verifie;
-}
-function controlerCoherence(contexte){
-  var stocke = lsGet(KEY_APPS);
-  if(stocke !== appsVuJson){
-    jLog('INCOHÉRENCE (' + contexte + ') : le stockage contient ' + jCompter(stocke) + ' app(s), la mémoire ' +
-      jCompter(appsVuJson) + '. Stockage : ' + jIdsApps(stocke).join(', '));
-  }
+  });
+  kvSet(KEY_DERNIER, JSON.stringify({ t: Date.now(), n: n, ids: etat.apps.map(idApp) }));
 }
 function dejaPresent(repo, file){
   return etat.apps.some(function(a){ return a.repo === repo && a.file === file; });
@@ -551,7 +623,7 @@ function ressembleDeployeur(app){
 }
 function definirDeployeur(app){
   etat.deployeur = app ? idApp(app) : null;
-  if(app) lsSet(KEY_DEP, etat.deployeur); else lsDel(KEY_DEP);
+  if(app) kvSet(KEY_DEP, etat.deployeur); else kvDel(KEY_DEP);
 }
 function ajouterApp(app, origine){
   etat.apps.push(app);
@@ -562,14 +634,14 @@ function ajouterApp(app, origine){
 }
 function chargerRecents(){
   try{
-    var r = JSON.parse(lsGet(KEY_REC) || '[]');
+    var r = JSON.parse(kvGet(KEY_REC) || '[]');
     return Array.isArray(r) ? r.filter(function(x){ return typeof x === 'string'; }) : [];
   }catch(e){ return []; }
 }
 function noterRecent(app){
   var id = idApp(app);
   etat.recents = [id].concat(etat.recents.filter(function(x){ return x !== id; })).slice(0, 12);
-  lsSet(KEY_REC, JSON.stringify(etat.recents));
+  kvSet(KEY_REC, JSON.stringify(etat.recents));
 }
 function recentsValides(){
   var out = [];
@@ -583,11 +655,11 @@ function recentsValides(){
 /* ---------- Tuiles épinglées (première page de l'accueil) ---------- */
 function chargerEpingles(){
   try{
-    var r = JSON.parse(lsGet(KEY_PIN) || '[]');
+    var r = JSON.parse(kvGet(KEY_PIN) || '[]');
     return Array.isArray(r) ? r.filter(function(x){ return typeof x === 'string'; }) : [];
   }catch(e){ return []; }
 }
-function sauverEpingles(){ lsSet(KEY_PIN, JSON.stringify(etat.epingles)); }
+function sauverEpingles(){ kvSet(KEY_PIN, JSON.stringify(etat.epingles)); }
 function epinglesValides(){
   var out = [];
   etat.epingles.forEach(function(id){
@@ -720,13 +792,13 @@ function nettoyerPerso(obj){
 }
 function chargerPersoLocal(){
   try{
-    var j = JSON.parse(lsGet(KEY_PERSO) || '{}');
+    var j = JSON.parse(kvGet(KEY_PERSO) || '{}');
     etat.perso = nettoyerPerso(j.apps);
     etat.attente = Array.isArray(j.attente) ? j.attente.filter(function(x){ return typeof x === 'string'; }) : [];
   }catch(e){ etat.perso = {}; etat.attente = []; }
 }
 function sauverPersoLocal(){
-  lsSet(KEY_PERSO, JSON.stringify({ apps: etat.perso, attente: etat.attente }));
+  kvSet(KEY_PERSO, JSON.stringify({ apps: etat.perso, attente: etat.attente }));
 }
 function nomTuile(app){
   var p = etat.perso[idApp(app)];
@@ -1280,7 +1352,6 @@ async function ouvrirApp(app, retour){
   }
 }
 function fermerApp(){
-  controlerCoherence('retour depuis une app');
   etat.chargement++;
   etat.appCourante = null;
   $('cadre').srcdoc = '';
@@ -1619,7 +1690,7 @@ function ouvrirGerer(){
             var imp = brut.recents.filter(function(id){ return typeof id === 'string' && !!trouverApp(id); });
             if(imp.length){
               etat.recents = imp.concat(etat.recents.filter(function(x){ return imp.indexOf(x) < 0; })).slice(0, 12);
-              lsSet(KEY_REC, JSON.stringify(etat.recents));
+              kvSet(KEY_REC, JSON.stringify(etat.recents));
               infos.push(imp.length + ' récente(s)');
             }
           }
@@ -1825,10 +1896,10 @@ function surveillerStockage(){
   });
   document.addEventListener('visibilitychange', function(){
     jLog('Page ' + (document.hidden ? 'masquée' : 'de nouveau visible') + '.');
-    if(!document.hidden) controlerCoherence('retour au premier plan');
+    if(document.hidden) jSauver(true);
   });
-  window.addEventListener('pageshow', function(e){ if(e.persisted){ jLog('Page restaurée depuis le cache du navigateur.'); controlerCoherence('restauration'); } });
-  window.addEventListener('pagehide', function(e){ jLog('Page quittée' + (e.persisted ? ' (mise en cache)' : '') + ' ; ' + etat.apps.length + ' app(s) en mémoire.'); });
+  window.addEventListener('pageshow', function(e){ if(e.persisted){ jLog('Page restaurée depuis le cache du navigateur.'); } });
+  window.addEventListener('pagehide', function(e){ jSauver(true); jLog('Page quittée' + (e.persisted ? ' (mise en cache)' : '') + ' ; ' + etat.apps.length + ' app(s) en mémoire.'); });
   window.addEventListener('error', function(e){ jLog('ERREUR JS : ' + e.message + ' (' + (e.filename || '').split('/').pop() + ':' + e.lineno + ')'); });
   window.addEventListener('unhandledrejection', function(e){ jLog('PROMESSE REJETÉE : ' + (e.reason && e.reason.message ? e.reason.message : e.reason)); });
 }
@@ -1836,10 +1907,16 @@ function journaliserDemarrage(){
   var standalone = false;
   try{ standalone = (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true; }catch(e){}
   jLog('──── Démarrage v' + VERSION + ' ; ' + (standalone ? 'application installée' : 'navigateur') + ' ; ' + navigator.userAgent);
-  jLog('Apps : ' + infoChargement + ' ; ' + etat.apps.length + ' en liste ; ' + etat.epingles.length + ' épinglée(s) ; ' + etat.recents.length + ' récente(s) ; clé ' + (etat.token ? 'présente' : 'absente') + '.');
-  jLog('Stockage : ' + jEtatStockage());
+  jLog('Apps : ' + infoChargement + ' ; ' + etat.apps.length + ' en liste ; ' + etat.epingles.length + ' épinglée(s) ; ' + etat.recents.length + ' récente(s) ; clé ' + (chargerToken() ? 'présente' : 'absente') + '.');
+  jLog('Stockage des données : ' + kvMode.toUpperCase() + '.');
+  jLog('localStorage (partagé avec les autres apps du site) : ' + jEtatStockage());
   try{
-    var d = JSON.parse(lsGet(KEY_DERNIER) || 'null');
+    var sk = 'passerelle_sonde';
+    localStorage.setItem(sk, new Array(2049).join('x')); localStorage.removeItem(sk);
+    jLog('localStorage : écriture de test de 2 Ko acceptée.');
+  }catch(e){ jLog('localStorage : écriture de test de 2 Ko REFUSÉE (' + (e && e.name) + ') → le stockage du site est PLEIN.'); }
+  try{
+    var d = JSON.parse(kvGet(KEY_DERNIER) || 'null');
     if(d && typeof d.n === 'number'){
       var ids = etat.apps.map(idApp);
       var manque = (d.ids || []).filter(function(id){ return ids.indexOf(id) < 0; });
@@ -1856,7 +1933,10 @@ function journaliserDemarrage(){
       });
     }
     if(navigator.storage && navigator.storage.persisted){
-      navigator.storage.persisted().then(function(p){ jLog('Stockage persistant accordé : ' + (p ? 'oui' : 'non') + '.'); });
+      navigator.storage.persisted().then(function(p){
+        jLog('Stockage persistant accordé : ' + (p ? 'oui' : 'non') + '.');
+        if(!p && navigator.storage.persist) navigator.storage.persist().then(function(r){ jLog('Demande de stockage persistant : ' + (r ? 'accordée' : 'refusée') + '.'); }, function(){});
+      });
     }
   }catch(e){}
 }
@@ -1891,7 +1971,7 @@ function init(){
   $('overlay').addEventListener('click', function(e){ if(e.target === $('overlay')) fermerModal(); });
 
   etat.apps = chargerApps();
-  etat.deployeur = lsGet(KEY_DEP);
+  etat.deployeur = kvGet(KEY_DEP);
   etat.recents = chargerRecents();
   etat.epingles = chargerEpingles();
   chargerPersoLocal();
@@ -1908,7 +1988,7 @@ function init(){
     afficher('cle');
   }
 }
-init();
+kvCharger().then(init, init);
 })();
 </script>
 </body>
