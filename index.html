@@ -1,18 +1,158 @@
 <!DOCTYPE html>
 <html lang="fr">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>passerelle</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<title>Passerelle</title>
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; background:#f5f5f7; color:#1d1d1f; text-align:center; padding:60px 20px; }
-  h1 { color:#0071e3; }
-  p { color:#86868b; }
+:root{--fond:#ECEFF3;--papier:#F8F9FB;--encre:#18212B;--sec:#5B6775;--trait:#CBD2DB;--laiton:#8F6410;--alerte:#B3372B}
+@media (prefers-color-scheme:dark){:root{--fond:#12171D;--papier:#1B222B;--encre:#E8ECF1;--sec:#97A3B1;--trait:#323C48;--laiton:#D9A441;--alerte:#E5877C}}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--fond);color:var(--encre);font:16px/1.4 -apple-system,system-ui,"Segoe UI",sans-serif}
+main{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  padding:calc(env(safe-area-inset-top,0px) + 24px) 24px calc(env(safe-area-inset-bottom,0px) + 24px)}
+h1{margin:0;font-size:26px}
+#msg{margin:0;color:var(--sec);text-align:center;max-width:420px}
+#msg.err{color:var(--alerte)}
+form,.rang{display:flex;flex-direction:column;gap:12px;width:100%;max-width:420px}
+input[type=password]{width:100%;padding:14px;font-size:16px;border:1px solid var(--trait);border-radius:12px;background:var(--papier);color:var(--encre)}
+label{color:var(--sec);font-size:15px}
+button{font:inherit;font-weight:600;padding:14px;border:0;border-radius:12px;background:var(--laiton);color:#fff}
+button.sec{background:var(--papier);color:var(--encre);border:1px solid var(--trait)}
+#v{position:fixed;top:calc(env(safe-area-inset-top,0px) + 12px);right:16px;padding:9px 14px;border-radius:999px;font-size:15px;line-height:1}
+#h{position:fixed;top:calc(env(safe-area-inset-top,0px) + 56px);right:16px;left:16px;max-width:420px;margin-left:auto;padding:14px;
+  background:var(--papier);border:1px solid var(--trait);border-radius:12px;font-size:14px;color:var(--sec)}
+#h b{color:var(--encre)}
+[hidden]{display:none!important}
 </style>
 </head>
 <body>
-<h1>passerelle</h1>
-<p>Nouvelle application créée avec Le Déployeur.</p>
-<p>Déploie ton code depuis l'étape 3 pour remplacer cette page.</p>
+<button id="v" type="button" aria-label="Historique des versions"></button>
+<div id="h" hidden></div>
+<main>
+  <h1>Passerelle</h1>
+  <p id="msg">Chargement…</p>
+  <form id="f" hidden>
+    <input type="password" id="k" placeholder="github_pat_…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" aria-label="Clé GitHub">
+    <label><input type="checkbox" id="g" checked> Garder la clé sur cet appareil</label>
+    <button type="submit">Ouvrir</button>
+  </form>
+  <div class="rang" id="r" hidden>
+    <button type="button" id="b-re">Réessayer</button>
+    <button type="button" id="b-cle" class="sec">Changer de clé</button>
+  </div>
+</main>
+<script>
+(function(){
+'use strict';
+
+var VERSION = '1.1.0';
+var HISTORIQUE = [
+  { v:'1.1.0', date:'18 oct. 2026', notes:[
+    'Démarrage instantané : l\'app s\'ouvre tout de suite depuis la copie gardée sur l\'appareil ; la version à jour est téléchargée en arrière-plan et sert au lancement suivant.',
+    'Un seul appel à GitHub au lieu de deux (l\'identifiant est déduit de l\'adresse du site).'
+  ]},
+  { v:'1.0.0', date:'18 oct. 2026', notes:[
+    'Première version : chargeur minimal. Il lit la clé GitHub (même emplacement qu\'avant), télécharge passerelle-app.html depuis le dépôt privé passerelle-privatedata et l\'exécute.',
+    'Copie gardée sur l\'appareil pour démarrer même sans réseau.'
+  ]}
+];
+
+var KEY = 'passerelle_token', DEPOT = 'passerelle-privatedata', FICHIER = 'passerelle-app.html';
+var API = 'https://api.github.com', CACHE = 'passerelle-boot';
+function $(i){ return document.getElementById(i); }
+
+function lireCle(){
+  try{ var a = localStorage.getItem(KEY); if(a) return a; }catch(e){}
+  try{ return sessionStorage.getItem(KEY) || null; }catch(e){ return null; }
+}
+function effacerCle(){
+  try{ localStorage.removeItem(KEY); }catch(e){}
+  try{ sessionStorage.removeItem(KEY); }catch(e){}
+}
+function sauverCle(t, garder){
+  effacerCle();
+  try{ (garder ? localStorage : sessionStorage).setItem(KEY, t); }catch(e){}
+}
+
+function etat(texte, erreur, mode){
+  $('msg').textContent = texte;
+  $('msg').className = erreur ? 'err' : '';
+  $('f').hidden = mode !== 'saisie';
+  $('r').hidden = mode !== 'erreur';
+}
+
+var CLE_CACHE = 'app';
+async function lireCache(){
+  try{ var c = await caches.open(CACHE), m = await c.match(CLE_CACHE); return m ? await m.text() : null; }catch(e){ return null; }
+}
+async function ecrireCache(t){
+  try{ var c = await caches.open(CACHE); await c.put(CLE_CACHE, new Response(t)); }catch(e){}
+}
+function ouvrir(texte){ document.open(); document.write(texte); document.close(); }
+function entetes(tok, accept){ return { 'Authorization':'Bearer ' + tok, 'Accept':accept, 'X-GitHub-Api-Version':'2022-11-28' }; }
+function echec(msg, status){ var e = new Error(msg); e.status = status; return e; }
+function lireFichier(tok, login){
+  return fetch(API + '/repos/' + login + '/' + DEPOT + '/contents/' + FICHIER,
+    { headers:entetes(tok, 'application/vnd.github.raw+json'), cache:'no-store' });
+}
+async function recuperer(tok){
+  var m = /^([^.]+)\.github\.io$/.exec(location.hostname);
+  var r = m ? await lireFichier(tok, m[1]) : null;
+  if(!r || r.status === 404){
+    var u = await fetch(API + '/user', { headers:entetes(tok, 'application/vnd.github+json'), cache:'no-store' });
+    if(u.status === 401) throw echec('', 401);
+    if(!u.ok) throw echec('GitHub a répondu ' + u.status + '.', u.status);
+    r = await lireFichier(tok, (await u.json()).login);
+  }
+  if(r.status === 401) throw echec('', 401);
+  if(r.status === 404) throw echec('Fichier introuvable : vérifie que la clé donne accès au dépôt ' + DEPOT + '.', 404);
+  if(!r.ok) throw echec('GitHub a répondu ' + r.status + '.', r.status);
+  return r.text();
+}
+async function lancer(tok){
+  var p = recuperer(tok).then(function(t){ ecrireCache(t); return t; });
+  p.catch(function(){});
+  var vieux = await lireCache();
+  if(vieux){ ouvrir(vieux); return; }
+  etat('Chargement…', false, '');
+  try{ ouvrir(await p); }
+  catch(e){
+    if(e.status === 401){ effacerCle(); etat('Clé refusée par GitHub. Entre une clé valide.', true, 'saisie'); return; }
+    etat(e instanceof TypeError ? 'Connexion à GitHub impossible. Vérifie ton réseau.' : (e.message || 'Erreur inconnue.'), true, 'erreur');
+  }
+}
+
+$('f').onsubmit = function(ev){
+  ev.preventDefault();
+  var t = $('k').value.trim();
+  if(!t) return;
+  sauverCle(t, $('g').checked);
+  $('k').value = '';
+  lancer(t);
+};
+$('b-re').onclick = function(){ var t = lireCle(); if(t) lancer(t); else etat('Entre ta clé pour ouvrir tes apps.', false, 'saisie'); };
+$('b-cle').onclick = function(){ effacerCle(); etat('Entre ta clé pour ouvrir tes apps.', false, 'saisie'); };
+
+$('v').className = 'sec';
+$('v').textContent = 'v' + VERSION;
+$('v').onclick = function(){
+  var h = $('h');
+  if(!h.hidden){ h.hidden = true; return; }
+  h.innerHTML = '';
+  HISTORIQUE.forEach(function(x){
+    var b = document.createElement('b'); b.textContent = 'v' + x.v + ' · ' + x.date;
+    h.appendChild(b);
+    x.notes.forEach(function(n){ var p = document.createElement('div'); p.textContent = '• ' + n; h.appendChild(p); });
+  });
+  h.hidden = false;
+};
+
+var t = lireCle();
+if(t) lancer(t);
+else etat('Entre ta clé pour ouvrir tes apps.', false, 'saisie');
+})();
+</script>
 </body>
 </html>
